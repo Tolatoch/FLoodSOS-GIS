@@ -1,0 +1,15 @@
+fastapi>=0.110.0
+uvicorn[standard]>=0.28.0
+pydantic>=2.6.0
+sqlalchemy>=2.0.27
+geoalchemy2>=0.14.3
+psycopg2-binary>=2.9.9
+shapely>=2.0.3
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
+argon2-cffi>=23.1.0
+python-multipart>=0.0.9
+requests>=2.31.0
+google-genai>=2.4.0
+langchain>=0.1.12
+langchain-core>=0.1.30

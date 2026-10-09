@@ -1,0 +1,68 @@
+version: '3.8'
+
+services:
+  # 1. Spatial Database: PostgreSQL 16 + PostGIS 3.4 + pgRouting
+  db:
+    image: postgis/postgis:16-3.4
+    container_name: floodsos_postgis
+    environment:
+      POSTGRES_DB: floodsos_db
+      POSTGRES_USER: floodsos
+      POSTGRES_PASSWORD: floodsos_secret
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./database/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
+      - ./database/seed.sql:/docker-entrypoint-initdb.d/02-seed.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U floodsos -d floodsos_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - floodsos_net
+
+  # 2. Backend: Python FastAPI + GeoAlchemy2 + LangChain + Gemini Agent
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: floodsos_api
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://floodsos:floodsos_secret@db:5432/floodsos_db
+      JWT_SECRET: ${JWT_SECRET:-floodsos_jwt_production_secret_key_2026}
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+    networks:
+      - floodsos_net
+
+  # 3. Frontend: Web GIS Client
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: floodsos_web
+    depends_on:
+      - backend
+    environment:
+      PORT: 3000
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+    ports:
+      - "3000:3000"
+    networks:
+      - floodsos_net
+
+volumes:
+  pgdata:
+    driver: local
+
+networks:
+  floodsos_net:
+    driver: bridge

@@ -1,0 +1,10 @@
+{
+  "name": "FloodSOS GIS - Upper Northern Thailand",
+  "description": "Web GIS for flood risk assessment, safe shelters directory, and emergency evacuation routing across Chiang Mai, Chiang Rai, Phayao, Nan, and Lampang.",
+  "requestFramePermissions": [
+    "geolocation"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
