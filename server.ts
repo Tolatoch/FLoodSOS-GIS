@@ -1,6 +1,7 @@
 import express, { Request, Response } from 'express';
 import { createServer as createViteServer } from 'vite';
 import dotenv from 'dotenv';
+import path from 'path';
 import { GoogleGenAI, Type } from '@google/genai';
 import {
   INITIAL_FLOOD_RISK_AREAS,
@@ -824,6 +825,9 @@ async function startServer() {
     app.use(vite.middlewares);
   } else {
     app.use(express.static('dist'));
+    app.get('*', (_req: Request, res: Response) => {
+      res.sendFile(path.resolve('dist', 'index.html'));
+    });
   }
 
   const port = process.env.PORT ? parseInt(process.env.PORT) : 3000;

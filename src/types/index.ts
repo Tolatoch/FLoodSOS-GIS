@@ -145,6 +145,18 @@ export interface User {
   createdAt: string;
 }
 
+export interface SavedRouteHistoryItem {
+  id: string;
+  timestamp: string;
+  shelterId: string;
+  shelterNameTh: string;
+  shelterNameEn: string;
+  distanceKm: number;
+  durationMinutes: number;
+  origin: [number, number];
+  destination: [number, number];
+}
+
 export interface ChatMessage {
   id: string;
   sender: 'user' | 'agent' | 'system';

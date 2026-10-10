@@ -377,11 +377,11 @@ export const EmergencyWizardModal: React.FC<EmergencyWizardModalProps> = ({
         </div>
 
         {/* Wizard Footer Controls */}
-        <div className="p-4 border-t border-slate-200 bg-slate-50 flex items-center justify-between shrink-0">
+        <div className="p-3 sm:p-4 border-t border-slate-200 bg-slate-50 flex items-center justify-between shrink-0">
           {step > 1 ? (
             <button
               onClick={() => setStep((s) => (s - 1) as any)}
-              className="py-2.5 px-4 bg-white hover:bg-slate-100 text-slate-700 rounded-xl font-bold text-xs flex items-center gap-1.5 border border-slate-200 min-h-[44px]"
+              className="h-10 sm:h-11 min-h-[40px] px-3.5 sm:px-4 bg-white hover:bg-slate-100 text-slate-700 rounded-xl font-bold text-xs sm:text-sm flex items-center gap-1.5 border border-slate-200"
             >
               <ArrowLeft className="w-4 h-4" />
               <span>ย้อนกลับ</span>
@@ -389,7 +389,7 @@ export const EmergencyWizardModal: React.FC<EmergencyWizardModalProps> = ({
           ) : (
             <button
               onClick={onClose}
-              className="py-2.5 px-4 text-slate-500 hover:text-slate-700 font-bold text-xs min-h-[44px]"
+              className="h-10 sm:h-11 min-h-[40px] px-3.5 sm:px-4 text-slate-500 hover:text-slate-700 font-bold text-xs sm:text-sm flex items-center justify-center"
             >
               ยกเลิก
             </button>
@@ -398,7 +398,7 @@ export const EmergencyWizardModal: React.FC<EmergencyWizardModalProps> = ({
           {step < 3 ? (
             <button
               onClick={() => setStep((s) => (s + 1) as any)}
-              className="py-2.5 px-5 bg-rose-600 hover:bg-rose-700 active:scale-98 text-white rounded-xl font-black text-xs md:text-sm flex items-center gap-2 shadow-md shadow-rose-600/30 transition-all min-h-[44px]"
+              className="h-11 min-h-[44px] px-4 sm:px-5 bg-rose-600 hover:bg-rose-700 active:scale-98 text-white rounded-xl font-black text-sm sm:text-[15px] flex items-center gap-2 shadow-md shadow-rose-600/30 transition-all"
             >
               <span>{step === 1 ? 'สแกนความเสี่ยงน้ำท่วม' : 'เลือกศูนย์พักพิงและเส้นทาง'}</span>
               <ArrowRight className="w-4 h-4" />
@@ -406,9 +406,9 @@ export const EmergencyWizardModal: React.FC<EmergencyWizardModalProps> = ({
           ) : (
             <button
               onClick={handleFinish}
-              className="py-2.5 px-6 bg-emerald-600 hover:bg-emerald-700 active:scale-98 text-white rounded-xl font-black text-xs md:text-sm flex items-center gap-2 shadow-lg shadow-emerald-600/30 transition-all min-h-[44px]"
+              className="h-11 min-h-[44px] px-4 sm:px-6 bg-emerald-600 hover:bg-emerald-700 active:scale-98 text-white rounded-xl font-black text-sm sm:text-[15px] flex items-center gap-2 shadow-lg shadow-emerald-600/30 transition-all"
             >
-              <Navigation className="w-4 h-4" />
+              <Navigation className="w-4 h-4 sm:w-[18px] sm:h-[18px]" />
               <span>เริ่มการนำทางอพยพทันที (Start Route)</span>
             </button>
           )}

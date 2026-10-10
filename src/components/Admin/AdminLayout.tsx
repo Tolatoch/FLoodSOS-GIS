@@ -24,6 +24,8 @@ interface AdminLayoutProps {
   onRefreshData: () => void;
   currentUser: User;
   lang: Language;
+  initialTab?: AdminTab;
+  onTabChange?: (tab: AdminTab) => void;
 }
 
 export type AdminTab = 'dashboard' | 'flood_risk' | 'shelters' | 'users' | 'audit';
@@ -35,9 +37,16 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
   onRefreshData,
   currentUser,
   lang,
+  initialTab = 'dashboard',
+  onTabChange,
 }) => {
-  const [activeTab, setActiveTab] = useState<AdminTab>('dashboard');
+  const [activeTab, setActiveTab] = useState<AdminTab>(initialTab);
   const t = TRANSLATIONS[lang];
+
+  const handleSelectTab = (tab: AdminTab) => {
+    setActiveTab(tab);
+    if (onTabChange) onTabChange(tab);
+  };
 
   return (
     <div className="absolute inset-0 z-30 bg-slate-100 flex flex-col md:flex-row overflow-hidden font-['Noto_Sans_Thai',sans-serif]">
@@ -69,7 +78,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
           {/* Navigation Links */}
           <nav className="p-3 space-y-1 text-xs">
             <button
-              onClick={() => setActiveTab('dashboard')}
+              onClick={() => handleSelectTab('dashboard')}
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl font-medium transition-all ${
                 activeTab === 'dashboard'
                   ? 'bg-sky-600 text-white font-bold shadow'
@@ -81,7 +90,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
             </button>
 
             <button
-              onClick={() => setActiveTab('flood_risk')}
+              onClick={() => handleSelectTab('flood_risk')}
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl font-medium transition-all ${
                 activeTab === 'flood_risk'
                   ? 'bg-sky-600 text-white font-bold shadow'
@@ -93,7 +102,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
             </button>
 
             <button
-              onClick={() => setActiveTab('shelters')}
+              onClick={() => handleSelectTab('shelters')}
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl font-medium transition-all ${
                 activeTab === 'shelters'
                   ? 'bg-sky-600 text-white font-bold shadow'
@@ -105,7 +114,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
             </button>
 
             <button
-              onClick={() => setActiveTab('users')}
+              onClick={() => handleSelectTab('users')}
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl font-medium transition-all ${
                 activeTab === 'users'
                   ? 'bg-sky-600 text-white font-bold shadow'
@@ -117,7 +126,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
             </button>
 
             <button
-              onClick={() => setActiveTab('audit')}
+              onClick={() => handleSelectTab('audit')}
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl font-medium transition-all ${
                 activeTab === 'audit'
                   ? 'bg-sky-600 text-white font-bold shadow'

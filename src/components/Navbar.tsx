@@ -1,550 +1,448 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   Compass,
   BarChart3,
   Home,
   Bot,
   ShieldCheck,
-  Globe,
   User as UserIcon,
-  Search,
   Navigation,
-  AlertTriangle,
   LogOut,
-  MapPin,
-  AlertOctagon,
-  Moon,
-  Sun,
-  Lock,
-  Menu,
   Check,
-  X,
+  Bookmark,
+  Globe,
 } from 'lucide-react';
-import { ProvinceId, User, AppViewMode, BasemapType } from '../types';
-import { PROVINCES } from '../data/geoData';
+import { User, AppViewMode } from '../types';
 import { TRANSLATIONS, Language } from '../data/translations';
 
 interface NavbarProps {
-  selectedProvince: ProvinceId | 'all';
-  onSelectProvince: (p: ProvinceId | 'all') => void;
   lang: Language;
   onToggleLang: () => void;
+  onSetLang?: (lang: Language) => void;
   viewMode: AppViewMode;
   onChangeViewMode: (mode: AppViewMode) => void;
   activePanel: 'none' | 'shelters' | 'route' | 'agent';
   onTogglePanel: (panel: 'none' | 'shelters' | 'route' | 'agent') => void;
-  onOpenEmergencyWizard: () => void;
   currentUser: User;
-  onOpenAuth: () => void;
+  onOpenAuth: (mode?: 'signin' | 'signup') => void;
   onSignOut: () => void;
-  onSearchSelect: (item: any) => void;
-  searchItems: { id: string; title: string; type: 'flood' | 'shelter' | 'province'; lat: number; lng: number }[];
-  basemap: BasemapType;
-  onChangeBasemap: (basemap: BasemapType) => void;
+  onOpenProfile?: () => void;
+  onOpenSavedShelters?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
-  selectedProvince,
-  onSelectProvince,
   lang,
   onToggleLang,
+  onSetLang,
   viewMode,
   onChangeViewMode,
   activePanel,
   onTogglePanel,
-  onOpenEmergencyWizard,
   currentUser,
   onOpenAuth,
   onSignOut,
-  onSearchSelect,
-  searchItems,
-  basemap,
-  onChangeBasemap,
+  onOpenProfile,
+  onOpenSavedShelters,
 }) => {
   const t = TRANSLATIONS[lang];
-  const [searchQuery, setSearchQuery] = useState('');
-  const [searchOpen, setSearchOpen] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(false);
 
-  const filteredSearch = searchQuery.trim()
-    ? searchItems
-        .filter((item) =>
-          item.title.toLowerCase().includes(searchQuery.toLowerCase())
-        )
-        .slice(0, 6)
-    : [];
+  // Language Popover State
+  const [langMenuOpen, setLangMenuOpen] = useState(false);
+  const langMenuRef = useRef<HTMLDivElement>(null);
+
+  // Account Menu State (Only for signed-in users)
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+  const accountMenuRef = useRef<HTMLDivElement>(null);
+
+  // Handle outside click & Esc for both menus
+  useEffect(() => {
+    if (!langMenuOpen && !accountMenuOpen) return;
+
+    const handleClickOutside = (event: MouseEvent | TouchEvent) => {
+      const target = event.target as Node;
+      if (langMenuRef.current && !langMenuRef.current.contains(target)) {
+        setLangMenuOpen(false);
+      }
+      if (accountMenuRef.current && !accountMenuRef.current.contains(target)) {
+        setAccountMenuOpen(false);
+      }
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setLangMenuOpen(false);
+        setAccountMenuOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('touchstart', handleClickOutside);
+    document.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('touchstart', handleClickOutside);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [langMenuOpen, accountMenuOpen]);
+
+  const handleSelectLanguage = (targetLang: Language) => {
+    if (lang !== targetLang) {
+      if (onSetLang) {
+        onSetLang(targetLang);
+      } else {
+        onToggleLang();
+      }
+    }
+    setLangMenuOpen(false);
+  };
+
+  const handleAccountClick = () => {
+    if (currentUser.role === 'guest') {
+      // Guest: directly open the auth modal on the SIGN UP form. No dropdown.
+      onOpenAuth('signup');
+    } else {
+      // Signed-in user: toggle dropdown menu
+      setAccountMenuOpen(!accountMenuOpen);
+    }
+  };
 
   return (
     <>
       {/* ========================================================
-          TOP HEADER & FLOATING CONTROLS
+          1. TOP-RIGHT FLOATING CONTROLS
+          - Order: Globe button, then Account button
+          - Hidden on phone & tablet when dashboard is open so nothing sits on top of the title
+          - Sizes: 40px phone, 44px tablet, 48px desktop (round white)
           ======================================================== */}
-      <header className="absolute top-0 left-0 right-0 z-30 pointer-events-none p-2 md:p-3 safe-top flex flex-col gap-2 max-w-full overflow-hidden">
-        {/* ========================================================
-            Requirement 1: Header - One Row Only!
-            Show logo, SOS button, profile/sign-in button.
-            Language toggle and dark mode moved into menu.
-            Nothing may overflow horizontally.
-            ======================================================== */}
-        <div className="pointer-events-auto flex items-center justify-between gap-2 bg-white/95 backdrop-blur-md px-2.5 md:px-4 py-1.5 md:py-2 rounded-2xl shadow-lg border border-slate-200/80 w-full max-w-full overflow-hidden min-h-[52px]">
-          {/* 1. Logo & Branding (Left) */}
-          <div className="flex items-center gap-1.5 min-w-0 shrink">
-            <button
-              onClick={() => {
-                onChangeViewMode('map');
-                onTogglePanel('none');
-              }}
-              className="flex items-center gap-2 group text-left min-w-0"
-            >
-              <div className="w-9 h-9 md:w-10 md:h-10 rounded-xl bg-gradient-to-tr from-blue-700 via-sky-600 to-indigo-700 flex items-center justify-center text-white shadow-md shadow-sky-500/20 group-hover:scale-105 transition-transform shrink-0">
-                <Compass className="w-5 h-5 md:w-6 md:h-6" />
-              </div>
-              <div className="min-w-0">
-                <div className="flex items-center gap-1">
-                  <span className="font-extrabold text-sm md:text-lg tracking-tight text-slate-900 font-['Prompt'] truncate">
-                    FloodSOS<span className="text-sky-600"> GIS</span>
-                  </span>
-                  <span className="hidden sm:inline-flex items-center px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-rose-100 text-rose-700 border border-rose-200">
-                    LIVE
-                  </span>
-                </div>
-                <p className="hidden xl:block text-[10px] text-slate-500 font-medium truncate max-w-xs">
-                  5 จังหวัดภาคเหนือตอนบน
-                </p>
-              </div>
-            </button>
-          </div>
+      <div className={`fixed top-3.5 right-3.5 sm:top-4 sm:right-6 z-40 items-center gap-2.5 sm:gap-3 pointer-events-auto ${
+        viewMode === 'dashboard' ? 'hidden lg:flex' : 'flex'
+      }`}>
+        {/* Language Globe Button */}
+        <div className="relative" ref={langMenuRef}>
+          <button
+            onClick={() => setLangMenuOpen(!langMenuOpen)}
+            className="w-10 h-10 sm:w-11 sm:h-11 lg:w-12 lg:h-12 min-h-[40px] min-w-[40px] sm:min-h-[44px] sm:min-w-[44px] lg:min-h-[48px] lg:min-w-[48px] rounded-full bg-white/95 hover:bg-white text-slate-800 shadow-xl border border-slate-200/90 flex items-center justify-center transition-all active:scale-95 backdrop-blur-md"
+            title={lang === 'th' ? 'เปลี่ยนภาษา / Change Language' : 'Change Language'}
+            aria-label="Language Selector"
+            aria-expanded={langMenuOpen}
+          >
+            <Globe className="w-5 h-5 lg:w-[22px] lg:h-[22px] text-slate-700" />
+          </button>
 
-          {/* Desktop Only: Google Maps Search Bar in Main Header */}
-          <div className="hidden md:block relative flex-1 max-w-xs lg:max-w-sm mx-2">
-            <div className="relative flex items-center bg-slate-100/90 hover:bg-slate-100 focus-within:bg-white focus-within:ring-2 focus-within:ring-sky-500 rounded-xl transition-all border border-slate-200/60 px-3 py-1.5 shadow-inner">
-              <Search className="w-4 h-4 text-slate-400 mr-2 shrink-0" />
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => {
-                  setSearchQuery(e.target.value);
-                  setSearchOpen(true);
-                }}
-                onFocus={() => setSearchOpen(true)}
-                placeholder={t.searchPlaceholder}
-                className="w-full bg-transparent border-none text-xs text-slate-800 focus:outline-none placeholder:text-slate-400"
-              />
-              {searchQuery && (
-                <button
-                  onClick={() => {
-                    setSearchQuery('');
-                    setSearchOpen(false);
-                  }}
-                  className="text-slate-400 hover:text-slate-600 text-xs px-1"
-                >
-                  ✕
-                </button>
-              )}
-            </div>
-
-            {/* Desktop Autocomplete */}
-            {searchOpen && filteredSearch.length > 0 && (
-              <div className="absolute top-full left-0 right-0 mt-1 bg-white rounded-xl shadow-2xl border border-slate-200 overflow-hidden z-50 animate-in fade-in">
-                {filteredSearch.map((item) => (
-                  <button
-                    key={`${item.type}-${item.id}`}
-                    onClick={() => {
-                      onSearchSelect(item);
-                      setSearchQuery(item.title);
-                      setSearchOpen(false);
-                    }}
-                    className="w-full text-left px-3 py-2 text-xs hover:bg-sky-50 flex items-center gap-2 border-b border-slate-100 last:border-b-0"
-                  >
-                    {item.type === 'flood' ? (
-                      <AlertTriangle className="w-4 h-4 text-rose-500 shrink-0" />
-                    ) : item.type === 'shelter' ? (
-                      <Home className="w-4 h-4 text-emerald-600 shrink-0" />
-                    ) : (
-                      <MapPin className="w-4 h-4 text-sky-600 shrink-0" />
-                    )}
-                    <span className="font-medium text-slate-800 truncate">{item.title}</span>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Desktop View Switchers */}
-          <div className="hidden lg:flex items-center gap-1 bg-slate-100/90 p-1 rounded-xl border border-slate-200/80">
-            <button
-              onClick={() => {
-                onChangeViewMode('map');
-                onTogglePanel('none');
-              }}
-              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all ${
-                viewMode === 'map' && activePanel === 'none'
-                  ? 'bg-sky-600 text-white shadow-sm'
-                  : 'text-slate-700 hover:bg-white'
-              }`}
-            >
-              <Compass className="w-3.5 h-3.5" />
-              <span>{t.tabs.map}</span>
-            </button>
-            <button
-              onClick={() => onChangeViewMode('dashboard')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all ${
-                viewMode === 'dashboard'
-                  ? 'bg-sky-600 text-white shadow-sm'
-                  : 'text-slate-700 hover:bg-white'
-              }`}
-            >
-              <BarChart3 className="w-3.5 h-3.5" />
-              <span>{t.tabs.dashboard}</span>
-            </button>
-          </div>
-
-          {/* Right Action Cluster: SOS Button & Profile/Settings Menu Button */}
-          <div className="flex items-center gap-1.5 shrink-0">
-            {/* 2. SOS Button (Touch Target >= 44px) */}
-            <button
-              onClick={onOpenEmergencyWizard}
-              className="min-h-[44px] px-3 bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 active:scale-95 text-white font-extrabold rounded-xl shadow-md shadow-rose-600/20 text-xs flex items-center justify-center gap-1 shrink-0 font-['Prompt'] transition-all"
-              title="ขอความช่วยเหลือฉุกเฉิน 3 ขั้นตอน"
-            >
-              <AlertOctagon className="w-4 h-4 text-white animate-pulse" />
-              <span className="hidden sm:inline">SOS ฉุกเฉิน</span>
-              <span className="sm:hidden font-black">SOS</span>
-            </button>
-
-            {/* 3. Profile / Settings Menu Button (Touch Target >= 44px) */}
-            <div className="relative">
+          {/* Language Popover */}
+          {langMenuOpen && (
+            <div className="absolute right-0 top-full mt-2 w-[160px] bg-white rounded-2xl shadow-2xl border border-slate-200/90 py-1.5 z-50 animate-in fade-in zoom-in-95 text-xs sm:text-[14px] text-slate-800">
               <button
-                onClick={() => setMenuOpen(!menuOpen)}
-                className="min-h-[44px] min-w-[44px] px-2.5 rounded-xl text-xs font-medium transition-all bg-slate-100 hover:bg-slate-200 text-slate-800 flex items-center justify-center gap-1.5 border border-slate-200/80 active:scale-95"
-                title="เมนูและการตั้งค่า (Menu & Settings)"
-                aria-label="User Menu and Settings"
+                onClick={() => handleSelectLanguage('th')}
+                className={`w-full text-left px-3.5 py-2.5 flex items-center justify-between hover:bg-sky-50 transition-colors font-medium ${
+                  lang === 'th' ? 'text-sky-700 font-bold bg-sky-50/60' : 'text-slate-700'
+                }`}
               >
-                <UserIcon className="w-4 h-4 text-slate-700" />
-                <Menu className="w-3.5 h-3.5 text-slate-500" />
+                <span>ภาษาไทย</span>
+                {lang === 'th' && <Check className="w-4 h-4 text-sky-600" />}
               </button>
-
-              {/* Combined Menu Dropdown (User Account, Language Toggle, Dark Mode) */}
-              {menuOpen && (
-                <div className="absolute right-0 mt-2 w-64 bg-white/98 backdrop-blur-xl rounded-2xl shadow-2xl border border-slate-200 py-2 z-50 animate-in fade-in zoom-in-95 text-xs text-slate-800">
-                  {/* User Profile Card */}
-                  <div className="px-3.5 py-2.5 border-b border-slate-100">
-                    <p className="font-bold text-slate-900 truncate">
-                      {currentUser.role === 'guest' ? 'ผู้เยี่ยมชม (Guest)' : currentUser.name}
-                    </p>
-                    <p className="text-[11px] text-slate-500 truncate">{currentUser.email}</p>
-                    {currentUser.role === 'guest' ? (
-                      <button
-                        onClick={() => {
-                          onOpenAuth();
-                          setMenuOpen(false);
-                        }}
-                        className="mt-2 w-full py-1.5 px-2.5 bg-sky-600 hover:bg-sky-700 text-white rounded-lg font-bold text-center transition-colors"
-                      >
-                        {t.auth.signIn} / {t.auth.signUp}
-                      </button>
-                    ) : (
-                      <span className="inline-block mt-1 text-[9px] uppercase px-1.5 py-0.5 bg-sky-100 text-sky-800 font-bold rounded">
-                        {currentUser.role}
-                      </span>
-                    )}
-                  </div>
-
-                  {/* Menu Item 1: Language Toggle (Moved into Menu as requested) */}
-                  <div className="px-3.5 py-2 border-b border-slate-100">
-                    <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">
-                      {lang === 'th' ? 'ภาษา / Language' : 'Language'}
-                    </span>
-                    <div className="grid grid-cols-2 gap-1.5 bg-slate-100 p-1 rounded-xl">
-                      <button
-                        onClick={() => {
-                          if (lang !== 'th') onToggleLang();
-                        }}
-                        className={`py-1.5 px-2 rounded-lg font-bold text-xs flex items-center justify-center gap-1 transition-all ${
-                          lang === 'th' ? 'bg-white shadow text-sky-700' : 'text-slate-600 hover:text-slate-900'
-                        }`}
-                      >
-                        {lang === 'th' && <Check className="w-3 h-3 text-sky-600" />}
-                        <span>ภาษาไทย</span>
-                      </button>
-                      <button
-                        onClick={() => {
-                          if (lang !== 'en') onToggleLang();
-                        }}
-                        className={`py-1.5 px-2 rounded-lg font-bold text-xs flex items-center justify-center gap-1 transition-all ${
-                          lang === 'en' ? 'bg-white shadow text-sky-700' : 'text-slate-600 hover:text-slate-900'
-                        }`}
-                      >
-                        {lang === 'en' && <Check className="w-3 h-3 text-sky-600" />}
-                        <span>English</span>
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Menu Item 2: Dark Mode Toggle (Moved into Menu as requested) */}
-                  <div className="px-3.5 py-2 border-b border-slate-100">
-                    <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">
-                      {lang === 'th' ? 'โหมดแผนที่ / Basemap Theme' : 'Basemap Theme'}
-                    </span>
-                    <div className="grid grid-cols-2 gap-1.5 bg-slate-100 p-1 rounded-xl">
-                      <button
-                        onClick={() => onChangeBasemap('osm')}
-                        className={`py-1.5 px-2 rounded-lg font-bold text-xs flex items-center justify-center gap-1.5 transition-all ${
-                          basemap !== 'dark' ? 'bg-white shadow text-sky-700' : 'text-slate-600 hover:text-slate-900'
-                        }`}
-                      >
-                        <Sun className="w-3.5 h-3.5 text-amber-500" />
-                        <span>Light</span>
-                      </button>
-                      <button
-                        onClick={() => onChangeBasemap('dark')}
-                        className={`py-1.5 px-2 rounded-lg font-bold text-xs flex items-center justify-center gap-1.5 transition-all ${
-                          basemap === 'dark' ? 'bg-slate-900 text-white shadow' : 'text-slate-600 hover:text-slate-900'
-                        }`}
-                      >
-                        <Moon className="w-3.5 h-3.5 text-sky-400" />
-                        <span>Dark SOS</span>
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Menu Item 3: Protected Admin Portal (Admin Only) */}
-                  {currentUser.role === 'admin' && (
-                    <button
-                      onClick={() => {
-                        onChangeViewMode('admin');
-                        setMenuOpen(false);
-                      }}
-                      className="w-full text-left px-3.5 py-2 hover:bg-sky-50 flex items-center gap-2 text-slate-700 font-semibold border-b border-slate-100"
-                    >
-                      <ShieldCheck className="w-4 h-4 text-sky-600" />
-                      <span>{t.tabs.admin} (Protected)</span>
-                    </button>
-                  )}
-
-                  {/* Menu Item 4: Sign Out (if logged in) */}
-                  {currentUser.role !== 'guest' && (
-                    <button
-                      onClick={() => {
-                        onSignOut();
-                        setMenuOpen(false);
-                      }}
-                      className="w-full text-left px-3.5 py-2 hover:bg-rose-50 flex items-center gap-2 text-rose-600 font-semibold"
-                    >
-                      <LogOut className="w-4 h-4" />
-                      <span>{t.auth.signOut}</span>
-                    </button>
-                  )}
-                </div>
-              )}
+              <button
+                onClick={() => handleSelectLanguage('en')}
+                className={`w-full text-left px-3.5 py-2.5 flex items-center justify-between hover:bg-sky-50 transition-colors font-medium ${
+                  lang === 'en' ? 'text-sky-700 font-bold bg-sky-50/60' : 'text-slate-700'
+                }`}
+              >
+                <span>English</span>
+                {lang === 'en' && <Check className="w-4 h-4 text-sky-600" />}
+              </button>
             </div>
-          </div>
+          )}
         </div>
 
-        {/* ========================================================
-            Requirement 5: Show floating search bar and province chips
-            on the Map tab only! Other tabs get their own header.
-            ======================================================== */}
-        {viewMode === 'map' && activePanel === 'none' && (
-          <>
-            {/* Mobile Google Maps-Style Floating Search Bar */}
-            <div className="md:hidden pointer-events-auto relative w-full px-0.5 animate-in fade-in">
-              <div className="relative flex items-center bg-white/95 backdrop-blur-md shadow-md rounded-2xl border border-slate-200/90 px-3 py-1.5 min-h-[44px]">
-                <Search className="w-4 h-4 text-slate-400 mr-2 shrink-0" />
-                <input
-                  type="text"
-                  value={searchQuery}
-                  onChange={(e) => {
-                    setSearchQuery(e.target.value);
-                    setSearchOpen(true);
-                  }}
-                  onFocus={() => setSearchOpen(true)}
-                  placeholder={t.searchPlaceholder}
-                  className="w-full bg-transparent border-none text-xs text-slate-800 focus:outline-none placeholder:text-slate-400 font-normal"
+        {/* Account Button (Person Icon) */}
+        <div className="relative" ref={accountMenuRef}>
+          <button
+            onClick={handleAccountClick}
+            className="w-10 h-10 sm:w-11 sm:h-11 lg:w-12 lg:h-12 min-h-[40px] min-w-[40px] sm:min-h-[44px] sm:min-w-[44px] lg:min-h-[48px] lg:min-w-[48px] rounded-full bg-white/95 hover:bg-white text-slate-800 shadow-xl border border-slate-200/90 flex items-center justify-center transition-all active:scale-95 backdrop-blur-md"
+            title={currentUser.role === 'guest' ? (lang === 'th' ? 'สมัครสมาชิก' : 'Sign Up') : t.auth.myProfile}
+            aria-label="User Account Menu"
+            aria-expanded={accountMenuOpen}
+          >
+            {currentUser && currentUser.role !== 'guest' ? (
+              currentUser.avatar ? (
+                <img
+                  src={currentUser.avatar}
+                  alt={currentUser.name}
+                  className="w-7 h-7 sm:w-8 sm:h-8 rounded-full object-cover border border-sky-400 shrink-0"
                 />
-                {searchQuery && (
+              ) : (
+                <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-gradient-to-tr from-sky-600 to-blue-700 text-white font-bold text-xs sm:text-sm flex items-center justify-center shrink-0">
+                  {(currentUser.name || 'U').charAt(0).toUpperCase()}
+                </div>
+              )
+            ) : (
+              <UserIcon className="w-5 h-5 lg:w-[22px] lg:h-[22px] text-slate-700 shrink-0" />
+            )}
+          </button>
+
+          {/* Account Dropdown Menu (Signed-in users only; language toggle removed) */}
+          {accountMenuOpen && currentUser.role !== 'guest' && (
+            <div className="absolute right-0 top-full mt-2 w-[220px] sm:w-[250px] bg-white rounded-2xl shadow-2xl border border-slate-200/90 py-1.5 z-50 animate-in fade-in zoom-in-95 text-xs sm:text-[14px] text-slate-800">
+              <div className="px-3.5 py-2.5 bg-slate-50/90 border-b border-slate-100 flex items-center gap-2.5">
+                {currentUser.avatar ? (
+                  <img
+                    src={currentUser.avatar}
+                    alt={currentUser.name}
+                    className="w-8 h-8 rounded-full object-cover shrink-0 border border-slate-200"
+                  />
+                ) : (
+                  <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-sky-600 to-blue-700 text-white font-bold text-xs flex items-center justify-center shrink-0">
+                    {(currentUser.name || 'U').charAt(0).toUpperCase()}
+                  </div>
+                )}
+                <div className="min-w-0 flex-1">
+                  <p className="font-bold text-slate-900 truncate text-xs sm:text-sm leading-tight">
+                    {currentUser.name}
+                  </p>
+                  <p className="text-[11px] text-slate-500 truncate leading-tight mt-0.5">
+                    {currentUser.email}
+                  </p>
+                </div>
+              </div>
+
+              <div className="py-1 px-1 space-y-0.5">
+                <button
+                  onClick={() => {
+                    if (onOpenProfile) onOpenProfile();
+                    setAccountMenuOpen(false);
+                  }}
+                  className="w-full text-left px-3 h-10 rounded-xl hover:bg-sky-50 flex items-center gap-2.5 text-slate-700 font-semibold text-xs sm:text-sm transition-colors"
+                >
+                  <UserIcon className="w-4 h-4 text-sky-600 shrink-0" />
+                  <span>{t.auth.myProfile}</span>
+                </button>
+
+                <button
+                  onClick={() => {
+                    if (onOpenSavedShelters) onOpenSavedShelters();
+                    setAccountMenuOpen(false);
+                  }}
+                  className="w-full text-left px-3 h-10 rounded-xl hover:bg-sky-50 flex items-center gap-2.5 text-slate-700 font-semibold text-xs sm:text-sm transition-colors"
+                >
+                  <Bookmark className="w-4 h-4 text-amber-500 shrink-0" />
+                  <span>{t.auth.savedShelters}</span>
+                </button>
+
+                {currentUser.role === 'admin' && (
                   <button
                     onClick={() => {
-                      setSearchQuery('');
-                      setSearchOpen(false);
+                      onChangeViewMode('admin');
+                      setAccountMenuOpen(false);
                     }}
-                    className="w-8 h-8 flex items-center justify-center text-slate-400 hover:text-slate-600 min-h-[44px] min-w-[44px]"
-                    aria-label="Clear Search"
+                    className="w-full text-left px-3 h-10 rounded-xl hover:bg-sky-50 flex items-center justify-between text-sky-700 font-semibold text-xs sm:text-sm transition-colors"
                   >
-                    ✕
+                    <div className="flex items-center gap-2.5">
+                      <ShieldCheck className="w-4 h-4 text-sky-600 shrink-0" />
+                      <span>{t.auth.adminPanel}</span>
+                    </div>
+                    <span className="px-1.5 py-0.5 bg-sky-100 text-sky-800 text-[10px] font-bold rounded">
+                      {t.auth.adminBadge}
+                    </span>
                   </button>
                 )}
               </div>
 
-              {/* Mobile Autocomplete Results */}
-              {searchOpen && filteredSearch.length > 0 && (
-                <div className="absolute top-full left-0.5 right-0.5 mt-1 bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden z-50">
-                  {filteredSearch.map((item) => (
-                    <button
-                      key={`${item.type}-${item.id}`}
-                      onClick={() => {
-                        onSearchSelect(item);
-                        setSearchQuery(item.title);
-                        setSearchOpen(false);
-                      }}
-                      className="w-full text-left px-3 py-2.5 text-xs hover:bg-sky-50 flex items-center gap-2 border-b border-slate-100 last:border-b-0 min-h-[44px]"
-                    >
-                      {item.type === 'flood' ? (
-                        <AlertTriangle className="w-4 h-4 text-rose-500 shrink-0" />
-                      ) : item.type === 'shelter' ? (
-                        <Home className="w-4 h-4 text-emerald-600 shrink-0" />
-                      ) : (
-                        <MapPin className="w-4 h-4 text-sky-600 shrink-0" />
-                      )}
-                      <span className="font-medium text-slate-800 truncate">{item.title}</span>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* Province chips: horizontally scrollable row */}
-            <div className="pointer-events-auto relative w-full max-w-full overflow-hidden animate-in fade-in">
-              {/* Left Edge Gradient Fade */}
-              <div className="pointer-events-none absolute left-0 top-0 bottom-0 w-4 bg-gradient-to-r from-slate-900/40 to-transparent z-10" />
-
-              {/* Right Edge Gradient Fade */}
-              <div className="pointer-events-none absolute right-0 top-0 bottom-0 w-6 bg-gradient-to-l from-slate-900/40 to-transparent z-10" />
-
-              {/* Scrollable Container with Snap Scrolling */}
-              <div className="flex items-center gap-1.5 overflow-x-auto snap-scroll-x no-scrollbar py-1 px-1">
-                {/* All Provinces Chip */}
+              <div className="pt-1 border-t border-slate-100 px-1 pb-1">
                 <button
-                  onClick={() => onSelectProvince('all')}
-                  className={`snap-item shrink-0 min-h-[44px] min-w-[56px] px-3.5 py-1.5 text-xs font-semibold rounded-2xl transition-all flex items-center justify-center ${
-                    selectedProvince === 'all'
-                      ? 'bg-sky-600 text-white shadow-md font-bold ring-2 ring-sky-400/40'
-                      : 'bg-white/95 text-slate-700 hover:bg-white border border-slate-200/90 shadow-sm backdrop-blur-md'
-                  }`}
+                  onClick={() => {
+                    setAccountMenuOpen(false);
+                    onSignOut();
+                  }}
+                  className="w-full text-left px-3 h-10 rounded-xl hover:bg-rose-50 flex items-center gap-2.5 text-rose-600 font-semibold text-xs sm:text-sm transition-colors"
                 >
-                  {t.allProvinces}
+                  <LogOut className="w-4 h-4 text-rose-600 shrink-0" />
+                  <span>{t.auth.signOut}</span>
                 </button>
-
-                {/* All 5 Upper-Northern Provinces */}
-                {(Object.keys(PROVINCES) as ProvinceId[]).map((pid) => (
-                  <button
-                    key={pid}
-                    onClick={() => onSelectProvince(pid)}
-                    className={`snap-item shrink-0 min-h-[44px] px-3.5 py-1.5 text-xs font-semibold rounded-2xl transition-all flex items-center justify-center ${
-                      selectedProvince === pid
-                        ? 'bg-sky-600 text-white shadow-md font-bold ring-2 ring-sky-400/40'
-                        : 'bg-white/95 text-slate-700 hover:bg-white border border-slate-200/90 shadow-sm backdrop-blur-md'
-                    }`}
-                  >
-                    {lang === 'th' ? PROVINCES[pid].nameTh : PROVINCES[pid].nameEn}
-                  </button>
-                ))}
               </div>
             </div>
-          </>
-        )}
-      </header>
+          )}
+        </div>
+      </div>
 
       {/* ========================================================
-          Requirement 5: Bottom tab bar - single-line labels
-          (แผนที่, ศูนย์พักพิง, เส้นทาง, สถิติ, AI),
-          font size >= 11px, active state clearly visible.
+          2. CONVEX / DOCKED-FAB BOTTOM NAV FOR PHONE & TABLET (<1024px)
+          - Full width, attached to bottom, white, --nav-h 60px (+ safe-area)
+          - Soft shadow on top, centered container max 640px on tablet
+          - 5 equal items: แผนที่, ศูนย์พักพิง, เส้นทาง, สถิติ, AI
+          - Active item: 52px circle in brand gradient, white icon, 4px white ring,
+            soft shadow, raised poking out --nav-bump (20px) above the bar
+          - Smooth concave notch (sunken curve) docked around the circle
+          - Notch and circle slide horizontally in 300ms cubic-bezier(0.3, 0.8, 0.3, 1)
+          - Transform & opacity only; press feedback scales to 0.92
+          - Label stays below circle inside bar, bold, brand colored, 11px (12px tablet)
           ======================================================== */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-lg border-t border-slate-200/90 shadow-2xl flex items-center justify-around px-1 safe-bottom min-h-[56px]">
-        {/* Tab 1: แผนที่ (Map) */}
-        <button
-          onClick={() => {
-            onChangeViewMode('map');
-            onTogglePanel('none');
-          }}
-          className={`flex flex-col items-center justify-center flex-1 min-h-[48px] py-1 px-1 rounded-xl transition-all ${
-            viewMode === 'map' && activePanel === 'none'
-              ? 'text-sky-600 font-bold bg-sky-50/70'
-              : 'text-slate-500 hover:text-slate-800'
-          }`}
-          aria-label={lang === 'th' ? 'แผนที่' : 'Map'}
-        >
-          <Compass className="w-5 h-5 mb-0.5 shrink-0" />
-          <span className="text-[11px] font-semibold whitespace-nowrap truncate leading-none">
-            {lang === 'th' ? 'แผนที่' : 'Map'}
-          </span>
-        </button>
+      {(() => {
+        const currentTab: 'map' | 'shelters' | 'route' | 'stats' | 'agent' =
+          viewMode === 'dashboard'
+            ? 'stats'
+            : activePanel === 'shelters'
+            ? 'shelters'
+            : activePanel === 'route'
+            ? 'route'
+            : activePanel === 'agent'
+            ? 'agent'
+            : 'map';
 
-        {/* Tab 2: ศูนย์พักพิง (Shelters) */}
-        <button
-          onClick={() => {
-            onChangeViewMode('map');
-            onTogglePanel(activePanel === 'shelters' ? 'none' : 'shelters');
-          }}
-          className={`flex flex-col items-center justify-center flex-1 min-h-[48px] py-1 px-1 rounded-xl transition-all ${
-            activePanel === 'shelters'
-              ? 'text-emerald-600 font-bold bg-emerald-50/70'
-              : 'text-slate-500 hover:text-slate-800'
-          }`}
-          aria-label={lang === 'th' ? 'ศูนย์พักพิง' : 'Shelters'}
-        >
-          <Home className="w-5 h-5 mb-0.5 shrink-0" />
-          <span className="text-[11px] font-semibold whitespace-nowrap truncate leading-none">
-            {lang === 'th' ? 'ศูนย์พักพิง' : 'Shelters'}
-          </span>
-        </button>
+        const tabIndexMap: Record<'map' | 'shelters' | 'route' | 'stats' | 'agent', number> = {
+          map: 0,
+          shelters: 1,
+          route: 2,
+          stats: 3,
+          agent: 4,
+        };
 
-        {/* Tab 3: เส้นทาง (Route) */}
-        <button
-          onClick={() => {
-            onChangeViewMode('map');
-            onTogglePanel(activePanel === 'route' ? 'none' : 'route');
-          }}
-          className={`flex flex-col items-center justify-center flex-1 min-h-[48px] py-1 px-1 rounded-xl transition-all ${
-            activePanel === 'route'
-              ? 'text-sky-600 font-bold bg-sky-50/70'
-              : 'text-slate-500 hover:text-slate-800'
-          }`}
-          aria-label={lang === 'th' ? 'เส้นทาง' : 'Route'}
-        >
-          <Navigation className="w-5 h-5 mb-0.5 shrink-0" />
-          <span className="text-[11px] font-semibold whitespace-nowrap truncate leading-none">
-            {lang === 'th' ? 'เส้นทาง' : 'Route'}
-          </span>
-        </button>
+        const activeIndex = tabIndexMap[currentTab];
 
-        {/* Tab 4: สถิติ (Stats / Dashboard) */}
-        <button
-          onClick={() => {
-            onChangeViewMode('dashboard');
-            onTogglePanel('none');
-          }}
-          className={`flex flex-col items-center justify-center flex-1 min-h-[48px] py-1 px-1 rounded-xl transition-all ${
-            viewMode === 'dashboard'
-              ? 'text-sky-600 font-bold bg-sky-50/70'
-              : 'text-slate-500 hover:text-slate-800'
-          }`}
-          aria-label={lang === 'th' ? 'สถิติ' : 'Stats'}
-        >
-          <BarChart3 className="w-5 h-5 mb-0.5 shrink-0" />
-          <span className="text-[11px] font-semibold whitespace-nowrap truncate leading-none">
-            {lang === 'th' ? 'สถิติ' : 'Stats'}
-          </span>
-        </button>
+        const navItems: Array<{
+          id: 'map' | 'shelters' | 'route' | 'stats' | 'agent';
+          labelTh: string;
+          labelEn: string;
+          icon: React.ComponentType<{ className?: string }>;
+          onClick: () => void;
+        }> = [
+          {
+            id: 'map',
+            labelTh: 'แผนที่',
+            labelEn: 'Map',
+            icon: Compass,
+            onClick: () => {
+              onChangeViewMode('map');
+              onTogglePanel('none');
+            },
+          },
+          {
+            id: 'shelters',
+            labelTh: 'ศูนย์พักพิง',
+            labelEn: 'Shelters',
+            icon: Home,
+            onClick: () => {
+              onChangeViewMode('map');
+              onTogglePanel('shelters');
+            },
+          },
+          {
+            id: 'route',
+            labelTh: 'เส้นทาง',
+            labelEn: 'Route',
+            icon: Navigation,
+            onClick: () => {
+              onChangeViewMode('map');
+              onTogglePanel('route');
+            },
+          },
+          {
+            id: 'stats',
+            labelTh: 'สถิติ',
+            labelEn: 'Stats',
+            icon: BarChart3,
+            onClick: () => {
+              onChangeViewMode('dashboard');
+              onTogglePanel('none');
+            },
+          },
+          {
+            id: 'agent',
+            labelTh: 'AI',
+            labelEn: 'AI',
+            icon: Bot,
+            onClick: () => {
+              onChangeViewMode('map');
+              onTogglePanel('agent');
+            },
+          },
+        ];
 
-        {/* Tab 5: AI (AI Agent) */}
-        <button
-          onClick={() => {
-            onTogglePanel(activePanel === 'agent' ? 'none' : 'agent');
-          }}
-          className={`flex flex-col items-center justify-center flex-1 min-h-[48px] py-1 px-1 rounded-xl transition-all ${
-            activePanel === 'agent'
-              ? 'text-purple-600 font-bold bg-purple-50/70'
-              : 'text-purple-600/80 hover:text-purple-900'
-          }`}
-          aria-label="AI"
-        >
-          <Bot className="w-5 h-5 mb-0.5 shrink-0" />
-          <span className="text-[11px] font-semibold whitespace-nowrap truncate leading-none">
-            AI
-          </span>
-        </button>
-      </nav>
+        const ActiveIcon = navItems[activeIndex]?.icon || Compass;
+
+        return (
+          <nav
+            className="lg:hidden fixed inset-x-0 bottom-0 z-50 bg-white border-t border-slate-200/90 shadow-[0_-4px_20px_rgba(0,0,0,0.06)] h-[calc(var(--nav-h)+env(safe-area-inset-bottom,0px))] pb-[env(safe-area-inset-bottom,0px)]"
+            aria-label={lang === 'th' ? 'แถบนำทางหลัก' : 'Main navigation'}
+          >
+            <div className="relative w-full max-w-[640px] mx-auto h-[var(--nav-h)]">
+              {/* Single Sliding Notch + Active Docked-FAB Circle Layer */}
+              <div
+                className="absolute top-0 left-0 w-1/5 h-full pointer-events-none transition-transform duration-300 ease-[cubic-bezier(0.3,0.8,0.3,1)] motion-reduce:transition-none z-20"
+                style={{
+                  transform: `translateX(${activeIndex * 100}%)`,
+                }}
+              >
+                {/* Concave Notch SVG (sunken curve) around the circle */}
+                <div className="absolute -top-[1px] left-1/2 -translate-x-1/2 w-[88px] h-[26px] pointer-events-none">
+                  <svg viewBox="0 0 88 26" className="w-full h-full" fill="none">
+                    {/* Subtle sunken notch background fill */}
+                    <path
+                      d="M 0 1 C 18 1, 22 22, 44 22 C 66 22, 70 1, 88 1 L 88 26 L 0 26 Z"
+                      fill="#f8fafc"
+                      opacity="0.9"
+                    />
+                    {/* Smooth concave notch border line */}
+                    <path
+                      d="M 0 1 C 18 1, 22 22, 44 22 C 66 22, 70 1, 88 1"
+                      stroke="#e2e8f0"
+                      strokeWidth="1.5"
+                      strokeLinecap="round"
+                      fill="none"
+                    />
+                  </svg>
+                </div>
+
+                {/* Active 52px Circle Docked into the Notch */}
+                <div className="absolute -top-5 left-1/2 -translate-x-1/2 w-[52px] h-[52px] rounded-full bg-gradient-to-tr from-sky-600 via-sky-500 to-blue-600 ring-4 ring-white shadow-[0_8px_20px_rgba(2,132,199,0.38)] flex items-center justify-center transition-transform duration-100 select-none">
+                  <ActiveIcon className="w-6 h-6 text-white stroke-[2.25] transition-transform duration-200" />
+                </div>
+              </div>
+
+              {/* 5 Equal-Width Navigation Items */}
+              <div className="grid grid-cols-5 w-full h-full relative z-10">
+                {navItems.map((item, idx) => {
+                  const isActive = activeIndex === idx;
+                  const IconComponent = item.icon;
+                  const label = lang === 'th' ? item.labelTh : item.labelEn;
+
+                  return (
+                    <button
+                      key={item.id}
+                      onClick={item.onClick}
+                      className="group relative flex flex-col items-center justify-between h-full w-full pt-2 pb-1.5 transition-transform duration-100 ease-out active:scale-[0.92] focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-600 focus-visible:ring-offset-1 rounded-xl select-none"
+                      aria-label={label}
+                      aria-current={isActive ? 'page' : undefined}
+                    >
+                      {/* Inactive outline icon (22px, gray) - fades out when active */}
+                      <div
+                        className={`w-6 h-6 flex items-center justify-center transition-all duration-200 ${
+                          isActive
+                            ? 'opacity-0 scale-75 pointer-events-none'
+                            : 'opacity-100 scale-100 text-slate-500 group-hover:text-slate-800'
+                        }`}
+                      >
+                        <IconComponent className="w-[22px] h-[22px] stroke-[1.75]" />
+                      </div>
+
+                      {/* Label below the icon/circle inside the bar */}
+                      <span
+                        className={`text-[11px] md:text-[12px] leading-tight truncate transition-colors duration-200 ${
+                          isActive
+                            ? 'text-sky-700 font-bold'
+                            : 'text-slate-500 font-normal group-hover:text-slate-800'
+                        }`}
+                      >
+                        {label}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </nav>
+        );
+      })()}
     </>
   );
 };

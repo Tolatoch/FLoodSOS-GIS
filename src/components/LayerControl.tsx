@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   Layers,
   Check,
@@ -41,9 +41,37 @@ export const LayerControl: React.FC<LayerControlProps> = ({
   lang,
 }) => {
   const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSyncText, setLastSyncText] = useState('06:30 น. (2 นาทีที่แล้ว)');
   const t = TRANSLATIONS[lang];
+
+  // Close on tap outside or Esc
+  useEffect(() => {
+    if (!open) return;
+
+    const handleClickOutside = (event: MouseEvent | TouchEvent) => {
+      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('touchstart', handleClickOutside);
+    document.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('touchstart', handleClickOutside);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [open]);
 
   const toggle = (key: keyof LayerVisibility) => {
     onChangeLayers({ ...layers, [key]: !layers[key] });
@@ -63,20 +91,21 @@ export const LayerControl: React.FC<LayerControlProps> = ({
   };
 
   return (
-    <div className="relative">
-      {/* Floating Action Button (FAB) - Touch Target >= 44px */}
+    <div className="relative" ref={containerRef}>
+      {/* 44px round on phone/tablet, 52px on desktop */}
       <button
         onClick={() => setOpen(!open)}
-        className="w-12 h-12 bg-white/95 hover:bg-white text-slate-800 rounded-2xl shadow-xl border border-slate-200/90 flex items-center justify-center transition-all hover:scale-105 active:scale-95 group backdrop-blur-md min-h-[44px] min-w-[44px]"
+        className="w-11 h-11 sm:w-11 sm:h-11 lg:w-[52px] lg:h-[52px] min-h-[44px] min-w-[44px] lg:min-h-[52px] lg:min-w-[52px] bg-white/95 hover:bg-white text-slate-800 rounded-full shadow-xl border border-slate-200/90 flex items-center justify-center transition-all hover:scale-105 active:scale-95 group backdrop-blur-md"
         title={t.layers}
         aria-label={t.layers}
+        aria-expanded={open}
       >
-        <Layers className={`w-5 h-5 text-sky-600 transition-transform ${open ? 'rotate-90' : ''}`} />
+        <Layers className={`w-5 h-5 lg:w-6 lg:h-6 text-sky-600 transition-transform ${open ? 'rotate-90' : ''}`} />
       </button>
 
-      {/* Expanded Layer & GISTDA Feed Sheet */}
+      {/* Expanded Layer & GISTDA Feed Sheet - opens as a card next to the button, not over legend */}
       {open && (
-        <div className="fixed inset-x-3 bottom-20 md:bottom-auto md:absolute md:right-0 md:inset-x-auto md:top-full mt-0 md:mt-2 w-auto md:w-80 max-h-[75vh] md:max-h-[85vh] bg-white/98 backdrop-blur-xl rounded-3xl shadow-2xl border border-slate-200/90 p-4 z-50 overflow-y-auto animate-in fade-in slide-in-from-bottom-4 md:slide-in-from-top-2 no-scrollbar">
+        <div className="fixed inset-x-3 bottom-20 sm:fixed-none sm:absolute sm:right-full sm:mr-3 sm:bottom-0 sm:inset-x-auto w-auto sm:w-[320px] max-h-[75vh] sm:max-h-[82vh] bg-white/98 backdrop-blur-xl rounded-3xl shadow-2xl border border-slate-200/90 p-4 z-50 overflow-y-auto animate-in fade-in slide-in-from-bottom-4 sm:slide-in-from-right-2 no-scrollbar">
           {/* Header */}
           <div className="flex items-center justify-between pb-2.5 mb-3 border-b border-slate-100">
             <div className="flex items-center gap-2">
@@ -94,17 +123,14 @@ export const LayerControl: React.FC<LayerControlProps> = ({
             </div>
             <button
               onClick={() => setOpen(false)}
-              className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 hover:text-slate-800 flex items-center justify-center transition-colors min-h-[44px] min-w-[44px]"
+              className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 hover:text-slate-800 flex items-center justify-center transition-colors min-h-[32px] min-w-[32px]"
               aria-label="Close"
             >
               <X className="w-4 h-4" />
             </button>
           </div>
 
-          {/* ========================================================
-              1. GISTDA Satellite Feed & 1D/3D/7D Extent Switcher
-              (Moved into Layer Sheet as requested)
-              ======================================================== */}
+          {/* 1. GISTDA Satellite Feed & 1D/3D/7D Extent Switcher */}
           <div className="p-3 bg-slate-900 text-white rounded-2xl mb-3.5 space-y-2.5 shadow-inner">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
@@ -130,7 +156,7 @@ export const LayerControl: React.FC<LayerControlProps> = ({
               <div className="grid grid-cols-3 gap-1.5 bg-slate-800/80 p-1 rounded-xl border border-slate-700">
                 <button
                   onClick={() => onChangeTemporalExtent('1_day')}
-                  className={`py-1.5 text-xs font-bold rounded-lg transition-all min-h-[38px] flex flex-col items-center justify-center ${
+                  className={`py-1.5 text-xs font-bold rounded-lg transition-all min-h-[36px] flex flex-col items-center justify-center ${
                     temporalExtent === '1_day'
                       ? 'bg-sky-600 text-white shadow'
                       : 'text-slate-400 hover:text-white'
@@ -141,7 +167,7 @@ export const LayerControl: React.FC<LayerControlProps> = ({
                 </button>
                 <button
                   onClick={() => onChangeTemporalExtent('3_day')}
-                  className={`py-1.5 text-xs font-bold rounded-lg transition-all min-h-[38px] flex flex-col items-center justify-center ${
+                  className={`py-1.5 text-xs font-bold rounded-lg transition-all min-h-[36px] flex flex-col items-center justify-center ${
                     temporalExtent === '3_day'
                       ? 'bg-sky-600 text-white shadow'
                       : 'text-slate-400 hover:text-white'
@@ -152,7 +178,7 @@ export const LayerControl: React.FC<LayerControlProps> = ({
                 </button>
                 <button
                   onClick={() => onChangeTemporalExtent('7_day')}
-                  className={`py-1.5 text-xs font-bold rounded-lg transition-all min-h-[38px] flex flex-col items-center justify-center ${
+                  className={`py-1.5 text-xs font-bold rounded-lg transition-all min-h-[36px] flex flex-col items-center justify-center ${
                     temporalExtent === '7_day'
                       ? 'bg-sky-600 text-white shadow'
                       : 'text-slate-400 hover:text-white'
@@ -181,16 +207,14 @@ export const LayerControl: React.FC<LayerControlProps> = ({
             </div>
           </div>
 
-          {/* ========================================================
-              2. Vector GIS Layer Toggles
-              ======================================================== */}
+          {/* 2. Vector GIS Layer Toggles */}
           <div className="space-y-1 mb-3.5 text-xs">
             <span className="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1">
               {lang === 'th' ? 'ชั้นข้อมูลแผนที่ (GIS Layers)' : 'Map Layers'}
             </span>
 
             {/* Flood Risk Areas */}
-            <label className="flex items-center justify-between p-2 hover:bg-slate-50 rounded-xl cursor-pointer min-h-[44px]">
+            <label className="flex items-center justify-between p-2 hover:bg-slate-50 rounded-xl cursor-pointer min-h-[40px]">
               <span className="flex items-center gap-2.5 text-slate-800 font-medium">
                 <span className="w-3.5 h-3.5 rounded-full bg-rose-500 shadow-sm" />
                 <span>{t.floodRiskAreas} (5 ระดับ)</span>
@@ -199,12 +223,12 @@ export const LayerControl: React.FC<LayerControlProps> = ({
                 type="checkbox"
                 checked={layers.floodAreas}
                 onChange={() => toggle('floodAreas')}
-                className="w-5 h-5 text-sky-600 rounded-md focus:ring-sky-500 cursor-pointer"
+                className="w-4 h-4 text-sky-600 rounded-md focus:ring-sky-500 cursor-pointer"
               />
             </label>
 
             {/* Safe Shelters */}
-            <label className="flex items-center justify-between p-2 hover:bg-slate-50 rounded-xl cursor-pointer min-h-[44px]">
+            <label className="flex items-center justify-between p-2 hover:bg-slate-50 rounded-xl cursor-pointer min-h-[40px]">
               <span className="flex items-center gap-2.5 text-slate-800 font-medium">
                 <span className="w-3.5 h-3.5 rounded-full bg-emerald-500 shadow-sm" />
                 <span>{t.safeShelters} (ที่ดอนสูง)</span>
@@ -213,12 +237,12 @@ export const LayerControl: React.FC<LayerControlProps> = ({
                 type="checkbox"
                 checked={layers.shelters}
                 onChange={() => toggle('shelters')}
-                className="w-5 h-5 text-sky-600 rounded-md focus:ring-sky-500 cursor-pointer"
+                className="w-4 h-4 text-sky-600 rounded-md focus:ring-sky-500 cursor-pointer"
               />
             </label>
 
             {/* Major Rivers */}
-            <label className="flex items-center justify-between p-2 hover:bg-slate-50 rounded-xl cursor-pointer min-h-[44px]">
+            <label className="flex items-center justify-between p-2 hover:bg-slate-50 rounded-xl cursor-pointer min-h-[40px]">
               <span className="flex items-center gap-2.5 text-slate-800 font-medium">
                 <span className="w-3.5 h-3.5 rounded-full bg-sky-500 shadow-sm" />
                 <span>{t.rivers} (ปิง/กก/น่าน/วัง)</span>
@@ -227,12 +251,12 @@ export const LayerControl: React.FC<LayerControlProps> = ({
                 type="checkbox"
                 checked={layers.rivers}
                 onChange={() => toggle('rivers')}
-                className="w-5 h-5 text-sky-600 rounded-md focus:ring-sky-500 cursor-pointer"
+                className="w-4 h-4 text-sky-600 rounded-md focus:ring-sky-500 cursor-pointer"
               />
             </label>
 
             {/* Flood Frequency (น้ำท่วมซ้ำซาก) */}
-            <label className="flex items-center justify-between p-2 hover:bg-slate-50 rounded-xl cursor-pointer min-h-[44px]">
+            <label className="flex items-center justify-between p-2 hover:bg-slate-50 rounded-xl cursor-pointer min-h-[40px]">
               <span className="flex items-center gap-2.5 text-slate-800 font-medium">
                 <span className="w-3.5 h-3.5 rounded-full bg-amber-500 shadow-sm" />
                 <span>พื้นที่น้ำท่วมซ้ำซาก (1-3 ปี)</span>
@@ -241,12 +265,12 @@ export const LayerControl: React.FC<LayerControlProps> = ({
                 type="checkbox"
                 checked={showFrequencyZones}
                 onChange={onToggleFrequencyZones}
-                className="w-5 h-5 text-amber-600 rounded-md focus:ring-amber-500 cursor-pointer"
+                className="w-4 h-4 text-amber-600 rounded-md focus:ring-amber-500 cursor-pointer"
               />
             </label>
 
             {/* Administrative Boundaries */}
-            <label className="flex items-center justify-between p-2 hover:bg-slate-50 rounded-xl cursor-pointer min-h-[44px]">
+            <label className="flex items-center justify-between p-2 hover:bg-slate-50 rounded-xl cursor-pointer min-h-[40px]">
               <span className="flex items-center gap-2.5 text-slate-800 font-medium">
                 <span className="w-3.5 h-3.5 rounded-full bg-indigo-400 shadow-sm" />
                 <span>{t.adminBoundaries} (5 จังหวัด)</span>
@@ -255,14 +279,12 @@ export const LayerControl: React.FC<LayerControlProps> = ({
                 type="checkbox"
                 checked={layers.adminBoundaries}
                 onChange={() => toggle('adminBoundaries')}
-                className="w-5 h-5 text-sky-600 rounded-md focus:ring-sky-500 cursor-pointer"
+                className="w-4 h-4 text-sky-600 rounded-md focus:ring-sky-500 cursor-pointer"
               />
             </label>
           </div>
 
-          {/* ========================================================
-              3. Basemap Selector
-              ======================================================== */}
+          {/* 3. Basemap Selector */}
           <div className="pt-2.5 border-t border-slate-100">
             <span className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-2">
               {t.basemap}
@@ -270,7 +292,7 @@ export const LayerControl: React.FC<LayerControlProps> = ({
             <div className="grid grid-cols-4 gap-1.5">
               <button
                 onClick={() => onChangeBasemap('osm')}
-                className={`py-2 px-1 text-[11px] font-semibold rounded-xl border text-center transition-all min-h-[44px] flex flex-col items-center justify-center ${
+                className={`py-2 px-1 text-[11px] font-semibold rounded-xl border text-center transition-all min-h-[40px] flex flex-col items-center justify-center ${
                   basemap === 'osm'
                     ? 'bg-sky-50 border-sky-500 text-sky-700 shadow-sm font-bold'
                     : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
@@ -280,7 +302,7 @@ export const LayerControl: React.FC<LayerControlProps> = ({
               </button>
               <button
                 onClick={() => onChangeBasemap('dark')}
-                className={`py-2 px-1 text-[11px] font-semibold rounded-xl border text-center transition-all min-h-[44px] flex flex-col items-center justify-center ${
+                className={`py-2 px-1 text-[11px] font-semibold rounded-xl border text-center transition-all min-h-[40px] flex flex-col items-center justify-center ${
                   basemap === 'dark'
                     ? 'bg-slate-900 border-slate-900 text-white shadow-sm font-bold'
                     : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
@@ -290,7 +312,7 @@ export const LayerControl: React.FC<LayerControlProps> = ({
               </button>
               <button
                 onClick={() => onChangeBasemap('terrain')}
-                className={`py-2 px-1 text-[11px] font-semibold rounded-xl border text-center transition-all min-h-[44px] flex flex-col items-center justify-center ${
+                className={`py-2 px-1 text-[11px] font-semibold rounded-xl border text-center transition-all min-h-[40px] flex flex-col items-center justify-center ${
                   basemap === 'terrain'
                     ? 'bg-amber-50 border-amber-500 text-amber-800 shadow-sm font-bold'
                     : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
@@ -300,7 +322,7 @@ export const LayerControl: React.FC<LayerControlProps> = ({
               </button>
               <button
                 onClick={() => onChangeBasemap('satellite')}
-                className={`py-2 px-1 text-[11px] font-semibold rounded-xl border text-center transition-all min-h-[44px] flex flex-col items-center justify-center ${
+                className={`py-2 px-1 text-[11px] font-semibold rounded-xl border text-center transition-all min-h-[40px] flex flex-col items-center justify-center ${
                   basemap === 'satellite'
                     ? 'bg-emerald-50 border-emerald-500 text-emerald-800 shadow-sm font-bold'
                     : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'

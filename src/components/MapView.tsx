@@ -32,6 +32,8 @@ interface MapViewProps {
   onMapClick: (lat: number, lng: number) => void;
   userLocation: { lat: number; lng: number } | null;
   lang: Language;
+  hoveredShelterId?: string | null;
+  onMapReady?: (map: L.Map) => void;
 }
 
 export const MapView: React.FC<MapViewProps> = ({
@@ -50,6 +52,8 @@ export const MapView: React.FC<MapViewProps> = ({
   onMapClick,
   userLocation,
   lang,
+  hoveredShelterId,
+  onMapReady,
 }) => {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
@@ -83,12 +87,6 @@ export const MapView: React.FC<MapViewProps> = ({
       zoomControl: false,
     });
 
-    L.control
-      .zoom({
-        position: 'bottomright',
-      })
-      .addTo(map);
-
     map.on('click', (e: L.LeafletMouseEvent) => {
       onMapClick(e.latlng.lat, e.latlng.lng);
     });
@@ -104,8 +102,18 @@ export const MapView: React.FC<MapViewProps> = ({
     userLocLayerGroupRef.current = L.layerGroup().addTo(map);
 
     mapRef.current = map;
+    if (onMapReady) {
+      onMapReady(map);
+    }
+
+    // ResizeObserver to smoothly adapt whenever the desktop left panel expands/collapses
+    const resizeObserver = new ResizeObserver(() => {
+      map.invalidateSize();
+    });
+    resizeObserver.observe(mapContainerRef.current);
 
     return () => {
+      resizeObserver.disconnect();
       map.remove();
       mapRef.current = null;
     };
@@ -138,6 +146,8 @@ export const MapView: React.FC<MapViewProps> = ({
     const tileLayer = L.tileLayer(url, {
       attribution,
       maxZoom: 19,
+      updateWhenZooming: false,
+      keepBuffer: 4,
     }).addTo(map);
 
     basemapLayerRef.current = tileLayer;
@@ -182,7 +192,7 @@ export const MapView: React.FC<MapViewProps> = ({
     });
   }, [layers.rivers, basemap, lang]);
 
-  // Render Flood Risk Areas & Temporal/Frequency extent filters
+  // Render Flood Risk Badge Markers (Replaces polygon overlays)
   useEffect(() => {
     const group = floodLayerGroupRef.current;
     if (!group) return;
@@ -198,50 +208,175 @@ export const MapView: React.FC<MapViewProps> = ({
       return true; // 7-day includes all
     });
 
+    // 1. While an area is open/selected, draw that area's original outline in the level color (2px line, 15% fill)
+    if (selectedFloodArea) {
+      let outlineColor = '#16a34a';
+      if (selectedFloodArea.riskLevel === 'very_high' || selectedFloodArea.riskLevel === 'high') {
+        outlineColor = '#dc2626';
+      } else if (selectedFloodArea.riskLevel === 'moderate') {
+        outlineColor = '#eab308';
+      }
+
+      const outlinePolygon = L.polygon(selectedFloodArea.polygon, {
+        color: outlineColor,
+        weight: 2,
+        fillColor: outlineColor,
+        fillOpacity: 0.15,
+        interactive: false,
+      });
+      group.addLayer(outlinePolygon);
+    }
+
+    // 2. When zoomed out (zoomLevel <= 10) and no specific flood area is selected:
+    // Cluster nearby risk icons into a count badge colored by the highest level inside
+    if (zoomLevel <= 10 && !selectedFloodArea) {
+      const clusters: Record<string, FloodRiskArea[]> = {};
+      activeAreas.forEach((a) => {
+        if (!clusters[a.province]) clusters[a.province] = [];
+        clusters[a.province].push(a);
+      });
+
+      Object.entries(clusters).forEach(([provId, items]) => {
+        const avgLat = items.reduce((sum, item) => sum + item.center[0], 0) / items.length;
+        const avgLng = items.reduce((sum, item) => sum + item.center[1], 0) / items.length;
+        const count = items.length;
+
+        // Determine highest risk level inside
+        let highestColor = '#16a34a';
+        let isDanger = false;
+        if (items.some((i) => i.riskLevel === 'very_high' || i.riskLevel === 'high')) {
+          highestColor = '#dc2626';
+          isDanger = true;
+        } else if (items.some((i) => i.riskLevel === 'moderate')) {
+          highestColor = '#eab308';
+        }
+
+        const provInfo = PROVINCES[provId as ProvinceId];
+        const provName = provInfo ? (lang === 'th' ? provInfo.nameTh : provInfo.nameEn) : provId;
+
+        const clusterHtml = `
+          <div class="flood-risk-cluster ${isDanger ? 'animate-pulse-danger' : ''}" style="background-color: ${highestColor};">
+            <span>${count}</span>
+          </div>
+        `;
+
+        const clusterIcon = L.divIcon({
+          className: 'flood-risk-icon-wrapper',
+          html: clusterHtml,
+          iconSize: [36, 36],
+          iconAnchor: [18, 18],
+        });
+
+        const marker = L.marker([avgLat, avgLng], {
+          icon: clusterIcon,
+          zIndexOffset: -500, // Below shelter markers
+        });
+
+        marker.bindTooltip(
+          `<b>${provName}</b><br/>${count} ${lang === 'th' ? 'จุดเสี่ยงน้ำท่วม' : 'flood risk areas'}`,
+          { direction: 'top', className: 'bg-slate-900 text-white rounded-lg px-2 py-1 text-xs' }
+        );
+
+        marker.on('click', () => {
+          const map = mapRef.current;
+          if (map) {
+            const lats = items.map((i) => i.center[0]);
+            const lngs = items.map((i) => i.center[1]);
+            const bounds = L.latLngBounds(
+              [Math.min(...lats), Math.min(...lngs)],
+              [Math.max(...lats), Math.max(...lngs)]
+            );
+            map.fitBounds(bounds, { padding: [50, 50], maxZoom: 12 });
+          }
+        });
+
+        group.addLayer(marker);
+      });
+      return;
+    }
+
+    // 3. Individual Flood Risk Badge Markers (zoomLevel > 10 or when an area is selected)
+    // Sizing: 28px phone, 32px tablet, 36px desktop via CSS .flood-risk-badge
+    const width = window.innerWidth;
+    const isMobile = width < 640;
+    const isDesktop = width >= 1024;
+    const markerDim = isMobile ? 28 : (isDesktop ? 36 : 32);
+    const anchorDim = markerDim / 2;
+
     activeAreas.forEach((area) => {
       const isSelected = selectedFloodArea?.id === area.id;
 
-      let color = '#ea580c'; // moderate
-      let fillOpacity = 0.40;
-      if (area.riskLevel === 'very_high') {
-        color = '#9333ea'; // purple critical
-        fillOpacity = 0.60;
-      } else if (area.riskLevel === 'high') {
-        color = '#ef4444'; // red
-        fillOpacity = 0.50;
-      } else if (area.riskLevel === 'low') {
+      // 5-to-3 level mapping:
+      // Very Low and Low -> ปกติ (green)
+      // Moderate -> แจ้งเตือน (yellow)
+      // High and Very High -> อันตราย (red)
+      let color = '#16a34a';
+      let labelTh = 'ปกติ';
+      let labelEn = 'Normal';
+      let isDanger = false;
+      let svgIcon = `
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+          <path d="m9 12 2 2 4-4"/>
+        </svg>
+      `;
+
+      if (area.riskLevel === 'very_high' || area.riskLevel === 'high') {
+        color = '#dc2626';
+        labelTh = 'อันตราย';
+        labelEn = 'Danger';
+        isDanger = true;
+        svgIcon = `
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polygon points="7.86 2 16.14 2 22 7.86 22 16.14 16.14 22 7.86 22 2 16.14 2 7.86 7.86 2"/>
+            <line x1="12" y1="8" x2="12" y2="12"/>
+            <line x1="12" y1="16" x2="12.01" y2="16"/>
+          </svg>
+        `;
+      } else if (area.riskLevel === 'moderate') {
         color = '#eab308';
-        fillOpacity = 0.30;
-      } else if (area.riskLevel === 'very_low') {
-        color = '#22c55e';
-        fillOpacity = 0.25;
+        labelTh = 'แจ้งเตือน';
+        labelEn = 'Warning';
+        svgIcon = `
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/>
+            <line x1="12" y1="9" x2="12" y2="13"/>
+            <line x1="12" y1="17" x2="12.01" y2="17"/>
+          </svg>
+        `;
       }
 
-      // If frequency zones active, highlight recurrence
-      if (showFrequencyZones && area.floodFrequency === '1-3_years') {
-        fillOpacity = Math.min(0.85, fillOpacity + 0.2);
-      }
+      const badgeHtml = `
+        <div class="flood-risk-badge ${isDanger ? 'animate-pulse-danger' : ''} ${isSelected ? 'scale-125 ring-2 ring-white' : ''}" style="background-color: ${color};">
+          ${svgIcon}
+        </div>
+      `;
 
-      const polygon = L.polygon(area.polygon, {
-        color: isSelected ? '#ffffff' : color,
-        weight: isSelected ? 3.5 : 2,
-        fillColor: color,
-        fillOpacity: isSelected ? 0.75 : fillOpacity,
-        dashArray: area.riskLevel === 'very_high' ? '4, 4' : undefined,
+      const badgeIcon = L.divIcon({
+        className: 'flood-risk-icon-wrapper',
+        html: badgeHtml,
+        iconSize: [markerDim, markerDim],
+        iconAnchor: [anchorDim, anchorDim],
       });
 
-      polygon.on('click', (e) => {
+      const marker = L.marker(area.center, {
+        icon: badgeIcon,
+        zIndexOffset: isSelected ? 200 : -500, // Below shelter markers
+      });
+
+      marker.on('click', (e) => {
         L.DomEvent.stopPropagation(e);
         onSelectFloodArea(area);
       });
 
-      // Clean tooltip
-      polygon.bindTooltip(
-        `<b>${lang === 'th' ? area.titleTh : area.titleEn}</b><br/>🌊 ระดับน้ำ: ${area.waterDepthMeters} ม.`,
-        { direction: 'top', sticky: true, className: 'bg-slate-900 text-white rounded-lg px-2 py-1 text-xs' }
+      marker.bindTooltip(
+        `<b>${lang === 'th' ? area.titleTh : area.titleEn}</b><br/>
+         <span style="color: ${color}; font-weight: bold;">● ${lang === 'th' ? labelTh : labelEn}</span><br/>
+         🌊 ระดับน้ำ: ${area.waterDepthMeters} ม.`,
+        { direction: 'top', className: 'bg-slate-900 text-white rounded-lg px-2 py-1 text-xs', offset: [0, -14] }
       );
 
-      group.addLayer(polygon);
+      group.addLayer(marker);
     });
   }, [
     floodAreas,
@@ -250,6 +385,7 @@ export const MapView: React.FC<MapViewProps> = ({
     temporalExtent,
     showFrequencyZones,
     lang,
+    zoomLevel,
     onSelectFloodArea,
   ]);
 
@@ -303,7 +439,7 @@ export const MapView: React.FC<MapViewProps> = ({
           iconAnchor: [18, 18],
         });
 
-        const clusterMarker = L.marker([avgLat, avgLng], { icon: clusterIcon });
+        const clusterMarker = L.marker([avgLat, avgLng], { icon: clusterIcon, zIndexOffset: 600 });
         clusterMarker.bindTooltip(
           `<b>${provName}</b>: ศูนย์พักพิง ${count} แห่ง (คลิกเพื่อซูมเข้า)`,
           { direction: 'top', className: 'bg-emerald-950 text-white rounded-lg px-2 py-1 text-xs' }
@@ -322,28 +458,37 @@ export const MapView: React.FC<MapViewProps> = ({
     }
 
     // 2. Individual Shelter Markers (Zoom > 10 OR a shelter is selected)
+    // Responsive marker sizing: 28px phone, 32px tablet, 36px desktop
+    const width = window.innerWidth;
+    const isMobile = width < 640;
+    const isDesktop = width >= 1024;
+    const markerDim = isMobile ? 28 : (isDesktop ? 36 : 32);
+    const iconAnchorDim = markerDim / 2;
+
     shelters.forEach((shelter) => {
       const isSelected = selectedShelter?.id === shelter.id;
+      const isHovered = hoveredShelterId === shelter.id;
       const freeSlots = shelter.capacity - shelter.currentOccupants;
 
-      // When unselected: compact 24x24 dot without text
-      // When selected: full name + elevation badge
-      const customHtml = isSelected
+      // When selected or hovered: highlighted card/glow
+      const customHtml = isSelected || isHovered
         ? `
           <div style="
-            background: #0284c7;
+            background: ${isSelected ? '#0284c7' : '#059669'};
             color: white;
             padding: 4px 8px;
             border-radius: 20px;
             display: flex;
             align-items: center;
             gap: 6px;
-            box-shadow: 0 6px 18px rgba(2,132,199,0.55);
+            box-shadow: 0 6px 20px ${isSelected ? 'rgba(2,132,199,0.7)' : 'rgba(5,150,105,0.7)'};
             border: 2.5px solid white;
             cursor: pointer;
             white-space: nowrap;
             font-size: 11px;
             font-weight: 800;
+            transform: scale(${isHovered && !isSelected ? '1.15' : '1'});
+            transition: transform 0.15s ease;
           ">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
               <path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
@@ -357,8 +502,8 @@ export const MapView: React.FC<MapViewProps> = ({
           <div style="
             background: #059669;
             color: white;
-            width: 24px;
-            height: 24px;
+            width: ${markerDim}px;
+            height: ${markerDim}px;
             border-radius: 50%;
             border: 2px solid white;
             display: flex;
@@ -367,7 +512,7 @@ export const MapView: React.FC<MapViewProps> = ({
             box-shadow: 0 3px 8px rgba(0,0,0,0.3);
             cursor: pointer;
           ">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <svg width="${isMobile ? 14 : 16}" height="${isMobile ? 14 : 16}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
               <path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
               <polyline points="9 22 9 12 15 12 15 22"/>
             </svg>
@@ -375,13 +520,16 @@ export const MapView: React.FC<MapViewProps> = ({
         `;
 
       const customIcon = L.divIcon({
-        className: isSelected ? 'shelter-marker-selected' : 'shelter-marker-dot',
+        className: isSelected || isHovered ? 'shelter-marker-selected' : 'shelter-marker-dot',
         html: customHtml,
-        iconSize: isSelected ? [140, 30] : [24, 24],
-        iconAnchor: isSelected ? [70, 15] : [12, 12],
+        iconSize: isSelected || isHovered ? [140, 30] : [markerDim, markerDim],
+        iconAnchor: isSelected || isHovered ? [70, 15] : [iconAnchorDim, iconAnchorDim],
       });
 
-      const marker = L.marker([shelter.lat, shelter.lng], { icon: customIcon });
+      const marker = L.marker([shelter.lat, shelter.lng], {
+        icon: customIcon,
+        zIndexOffset: isSelected ? 1000 : isHovered ? 900 : 500,
+      });
 
       marker.on('click', (e) => {
         L.DomEvent.stopPropagation(e);
@@ -396,16 +544,13 @@ export const MapView: React.FC<MapViewProps> = ({
       group.addLayer(marker);
     });
 
-    // Keep selected marker inside viewport
+    // Center map on selected shelter
     if (selectedShelter && mapRef.current) {
       const map = mapRef.current;
       const pt = L.latLng(selectedShelter.lat, selectedShelter.lng);
-      const bounds = map.getBounds().pad(-0.08);
-      if (!bounds.contains(pt)) {
-        map.panTo(pt, { animate: true });
-      }
+      map.panTo(pt, { animate: true });
     }
-  }, [shelters, selectedShelter, layers.shelters, zoomLevel, lang, onSelectShelter]);
+  }, [shelters, selectedShelter, hoveredShelterId, layers.shelters, zoomLevel, lang, onSelectShelter]);
 
   // Render Evacuation Route
   useEffect(() => {
@@ -416,9 +561,10 @@ export const MapView: React.FC<MapViewProps> = ({
     if (!activeRoute) return;
 
     const isSafe = !activeRoute.hasFloodHazardOnRoute;
+    const isDesktop = window.innerWidth >= 1024;
     const polyline = L.polyline(activeRoute.coordinates, {
       color: isSafe ? '#10b981' : '#f43f5e',
-      weight: 6,
+      weight: isDesktop ? 6 : 5,
       opacity: 0.95,
       lineCap: 'round',
       lineJoin: 'round',
@@ -454,32 +600,68 @@ export const MapView: React.FC<MapViewProps> = ({
     originMarker.bindTooltip(lang === 'th' ? 'จุดเริ่มต้น (ผู้ประสบภัย)' : 'Start Location');
     group.addLayer(originMarker);
 
-    // Destination Marker (Verified Safe Shelter)
+    // Destination Marker with small anchored pill label (max-width 200px, 14px text on desktop, 12px on phone/tablet, ellipsis)
+    const destName = selectedShelter
+      ? (lang === 'th' ? selectedShelter.nameTh : selectedShelter.nameEn)
+      : (lang === 'th' ? 'ศูนย์พักพิงปลายทาง' : 'Destination Shelter');
+
+    const destFontSize = isDesktop ? '14px' : '12px';
+    const destPinDim = isDesktop ? 36 : 32;
+
     const destIcon = L.divIcon({
-      className: 'dest-marker',
+      className: 'dest-marker-container',
       html: `
-        <div style="
-          background: #059669;
-          color: white;
-          width: 32px;
-          height: 32px;
-          border-radius: 50%;
-          border: 3px solid white;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          box-shadow: 0 4px 14px rgba(5,150,105,0.6);
-          font-weight: 900;
-          font-size: 14px;
-        ">
-          ★
+        <div style="position: relative; display: flex; flex-direction: column; align-items: center;">
+          <!-- Anchored small pill destination label (max-width 200px, 14px on desktop / 12px on phone, one line ellipsis) -->
+          <div style="
+            position: absolute;
+            bottom: calc(100% + 4px);
+            background: rgba(15, 23, 42, 0.92);
+            color: #ffffff;
+            font-size: ${destFontSize};
+            font-weight: 700;
+            line-height: 1.2;
+            padding: 3px 8px;
+            border-radius: 9999px;
+            max-width: 200px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.35);
+            border: 1px solid rgba(255,255,255,0.25);
+            pointer-events: auto;
+            text-align: center;
+          " title="${destName}">
+            ${destName}
+          </div>
+
+          <!-- Destination Star Pin -->
+          <div style="
+            background: #059669;
+            color: white;
+            width: ${destPinDim}px;
+            height: ${destPinDim}px;
+            border-radius: 50%;
+            border: 3px solid white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 4px 14px rgba(5,150,105,0.6);
+            font-weight: 900;
+            font-size: ${isDesktop ? '16px' : '14px'};
+          ">
+            ★
+          </div>
         </div>
       `,
-      iconSize: [32, 32],
-      iconAnchor: [16, 16],
+      iconSize: [destPinDim, destPinDim],
+      iconAnchor: [destPinDim / 2, destPinDim / 2],
     });
     const destMarker = L.marker(activeRoute.destination, { icon: destIcon });
-    destMarker.bindTooltip(lang === 'th' ? 'ศูนย์พักพิงปลอดภัย (Verified Safe)' : 'Safe Shelter');
+    destMarker.bindTooltip(destName, {
+      direction: 'top',
+      className: 'bg-emerald-950 text-white rounded-lg px-2.5 py-1 text-xs font-semibold'
+    });
     group.addLayer(destMarker);
 
     if (mapRef.current) {
