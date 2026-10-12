@@ -6,7 +6,7 @@ export type GistdaStatus = 'normal' | 'watch' | 'warning' | 'critical';
 
 export type TemporalExtent = '1_day' | '3_day' | '7_day';
 
-export type BasemapType = 'osm' | 'terrain' | 'satellite' | 'dark';
+export type BasemapType = 'osm' | 'terrain' | 'satellite';
 
 export type AppViewMode = 'map' | 'dashboard' | 'admin';
 
@@ -93,9 +93,10 @@ export interface RouteStep {
   instructionEn: string;
   distanceMeters: number;
   durationSeconds: number;
-  icon: 'straight' | 'turn-left' | 'turn-right' | 'destination' | 'warning';
+  icon: 'straight' | 'turn-left' | 'turn-right' | 'destination' | 'warning' | 'u-turn' | 'slight-left' | 'slight-right';
   floodWarning?: string;
   roadName?: string;
+  location?: [number, number];
 }
 
 export interface EvacuationRoute {

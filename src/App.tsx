@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import L from 'leaflet';
 import {
   Compass,
   Home,
@@ -11,6 +12,7 @@ import {
   Info,
   Plus,
   Minus,
+  Loader2,
 } from 'lucide-react';
 import {
   ProvinceId,
@@ -26,6 +28,7 @@ import {
   INITIAL_FLOOD_RISK_AREAS,
   INITIAL_SHELTERS,
   PROVINCES,
+  NORTHERN_BOUNDS,
 } from './data/geoData';
 import { TRANSLATIONS, Language } from './data/translations';
 import { Navbar } from './components/Navbar';
@@ -36,6 +39,8 @@ import { ProvinceFilterButton } from './components/ProvinceFilterButton';
 import { FloodDetailModal } from './components/FloodDetailModal';
 import { ShelterFinderPanel } from './components/ShelterFinderPanel';
 import { EvacuationRoutePanel } from './components/EvacuationRoutePanel';
+import { NavigationScreen, NavigationState } from './components/NavigationScreen';
+import { NavigationStepListPanel } from './components/NavigationStepListPanel';
 import { DashboardView } from './components/DashboardView';
 import { AIAgentDrawer } from './components/AIAgentDrawer';
 import { AuthModal } from './components/AuthModal';
@@ -43,7 +48,7 @@ import { AdminLayout, AdminTab } from './components/Admin/AdminLayout';
 import { AdminLoginPage } from './components/Admin/AdminLoginPage';
 import { UserProfileModal } from './components/UserProfileModal';
 import { api } from './services/api';
-import { calculateEvacuationRoute, findNearestShelters } from './services/routingService';
+import { calculateEvacuationRoute, findNearestShelters, haversineDistance } from './services/routingService';
 import { AuthProvider, useAuth } from './context/AuthContext';
 
 type DesktopTab = 'map' | 'shelters' | 'route' | 'stats' | 'agent';
@@ -94,7 +99,31 @@ function FloodSosApp() {
     adminBoundaries: true,
   });
   const [basemap, setBasemap] = useState<BasemapType>('osm');
-  const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
+  const [userLocation, setUserLocation] = useState<{ lat: number; lng: number; accuracy?: number } | null>(null);
+  const [isLocating, setIsLocating] = useState<boolean>(false);
+  const [locateTrigger, setLocateTrigger] = useState<number>(0);
+
+  // Turn-by-Turn Navigation States
+  const [isNavigating, setIsNavigating] = useState<boolean>(false);
+  const [isDemoNavigation, setIsDemoNavigation] = useState<boolean>(false);
+  const [navigationState, setNavigationState] = useState<NavigationState | null>(null);
+  const [navStepIndex, setNavStepIndex] = useState<number>(0);
+  const [navRemainingMeters, setNavRemainingMeters] = useState<number>(0);
+  const [navRemainingMins, setNavRemainingMins] = useState<number>(0);
+
+  const handleStartNavigation = (isDemo: boolean) => {
+    setIsNavigating(true);
+    setIsDemoNavigation(isDemo);
+    if (window.innerWidth >= 1024) {
+      setDesktopTab('route');
+      setIsPanelCollapsed(false);
+    }
+  };
+
+  const handleExitNavigation = () => {
+    setIsNavigating(false);
+    setNavigationState(null);
+  };
 
   // Auth Dialog & Profile Modal State
   const [isAuthOpen, setIsAuthOpen] = useState(false);
@@ -225,21 +254,105 @@ function FloodSosApp() {
     refreshData();
   }, [selectedProvince]);
 
-  // Geolocation trigger
-  const handleLocateUser = () => {
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          const loc = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-          setUserLocation(loc);
-        },
-        () => {
-          setUserLocation({ lat: 18.783, lng: 99.002 });
-        }
+  // Geolocation trigger (with real accuracy, error handling, bounds checking, and shelter auto-fit)
+  const handleLocateUser = (forShelters = false) => {
+    if (!navigator.geolocation) {
+      showToast(
+        lang === 'th'
+          ? 'เบราว์เซอร์ไม่รองรับการระบุตำแหน่ง GPS'
+          : 'Geolocation is not supported by your browser'
       );
-    } else {
-      setUserLocation({ lat: 18.783, lng: 99.002 });
+      return;
     }
+
+    setIsLocating(true);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setIsLocating(false);
+        const lat = pos.coords.latitude;
+        const lng = pos.coords.longitude;
+        const accuracy = pos.coords.accuracy;
+        const loc = { lat, lng, accuracy };
+        setUserLocation(loc);
+
+        // Check if user is inside the 5-province area (NORTHERN_BOUNDS)
+        const isInsideNorthern =
+          lat >= NORTHERN_BOUNDS[0][0] &&
+          lat <= NORTHERN_BOUNDS[1][0] &&
+          lng >= NORTHERN_BOUNDS[0][1] &&
+          lng <= NORTHERN_BOUNDS[1][1];
+
+        if (!isInsideNorthern) {
+          showToast(
+            lang === 'th'
+              ? 'ตำแหน่งของคุณอยู่นอกพื้นที่ 5 จังหวัดภาคเหนือ (เชียงใหม่, เชียงราย, พะเยา, น่าน, ลำปาง)'
+              : 'Your location is outside the 5 northern provinces area'
+          );
+          return;
+        }
+
+        // Inside 5 northern provinces
+        if (forShelters) {
+          // Fit the map to the user plus the nearest shelter
+          const eligibleShelters =
+            selectedProvince === 'all'
+              ? shelters
+              : shelters.filter((s) => s.province === selectedProvince);
+          const pool = eligibleShelters.length > 0 ? eligibleShelters : shelters;
+          const nearest = [...pool].sort((a, b) => {
+            const dA = haversineDistance([lat, lng], [a.lat, a.lng]);
+            const dB = haversineDistance([lat, lng], [b.lat, b.lng]);
+            return dA - dB;
+          })[0];
+
+          if (nearest && mapRef.current) {
+            mapRef.current.fitBounds(
+              [
+                [lat, lng],
+                [nearest.lat, nearest.lng],
+              ],
+              { padding: [60, 60], maxZoom: 14 }
+            );
+          } else if (mapRef.current) {
+            mapRef.current.flyTo([lat, lng], 14, { duration: 1.2 });
+          }
+        } else {
+          // Fly to user position at zoom 14 every time, even if position hasn't changed
+          setLocateTrigger((prev) => prev + 1);
+        }
+      },
+      (err) => {
+        setIsLocating(false);
+        let errMsg = '';
+        if (err.code === err.PERMISSION_DENIED) {
+          errMsg =
+            lang === 'th'
+              ? 'การเข้าถึงตำแหน่ง GPS ถูกปฏิเสธ (Permission Denied)'
+              : 'Location permission denied. Please allow location access in your browser.';
+        } else if (err.code === err.POSITION_UNAVAILABLE) {
+          errMsg =
+            lang === 'th'
+              ? 'ไม่สามารถระบุตำแหน่ง GPS ได้ในขณะนี้ (Position Unavailable)'
+              : 'Location position unavailable.';
+        } else if (err.code === err.TIMEOUT) {
+          errMsg =
+            lang === 'th'
+              ? 'หมดเวลาการค้นหาตำแหน่ง GPS (Request Timed Out)'
+              : 'Location request timed out. Please try again.';
+        } else {
+          errMsg =
+            lang === 'th'
+              ? 'เกิดข้อผิดพลาดในการระบุตำแหน่ง GPS'
+              : 'Failed to retrieve GPS location.';
+        }
+        showToast(errMsg);
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 0,
+      }
+    );
   };
 
   // Click on flood area
@@ -420,9 +533,7 @@ function FloodSosApp() {
   // ==========================================
   return (
     <div
-      className={`relative w-screen h-screen overflow-hidden select-none font-['Roboto','Noto_Sans_Thai',sans-serif] ${
-        basemap === 'dark' ? 'bg-slate-950 text-white' : 'bg-slate-900 text-slate-900'
-      }`}
+      className="relative w-screen h-screen overflow-hidden select-none font-['Roboto','Noto_Sans_Thai',sans-serif] bg-slate-900 text-slate-900"
     >
       {/* 1. Global Navigation Bar:
              - Floating buttons in top-right corner only (No top header bar)
@@ -454,6 +565,7 @@ function FloodSosApp() {
           setProfileInitialTab('saved_shelters');
           setIsProfileOpen(true);
         }}
+        hideBottomNav={isNavigating}
       />
 
       {/* 2. Main Layout Container:
@@ -525,9 +637,11 @@ function FloodSosApp() {
               <ShelterFinderPanel
                 shelters={shelters}
                 selectedProvince={selectedProvince}
+                userLocation={userLocation}
+                isLocating={isLocating}
                 onSelectShelter={handleSelectShelter}
                 onPlanRoute={handlePlanRoute}
-                onLocateUser={handleLocateUser}
+                onLocateUser={() => handleLocateUser(true)}
                 onClose={() => setIsPanelCollapsed(true)}
                 onOpenAuth={() => {
                   setAuthMode('signin');
@@ -542,22 +656,36 @@ function FloodSosApp() {
             )}
 
             {desktopTab === 'route' && (
-              <EvacuationRoutePanel
-                recommendedRoute={recommendedRoute}
-                alternativeRoute={alternativeRoute}
-                selectedShelter={selectedShelter}
-                onSelectRouteOption={(opt) => setActiveRouteOption(opt)}
-                activeOption={activeRouteOption}
-                onClearRoute={() => {
-                  setRecommendedRoute(null);
-                  setAlternativeRoute(null);
-                }}
-                onClose={() => setIsPanelCollapsed(true)}
-                lang={lang}
-                isDesktopPanel={true}
-                onCollapse={() => setIsPanelCollapsed(true)}
-                onBrowseShelters={() => setDesktopTab('shelters')}
-              />
+              isNavigating && (activeRouteOption === 'recommended' ? recommendedRoute : alternativeRoute || recommendedRoute) && selectedShelter ? (
+                <NavigationStepListPanel
+                  route={(activeRouteOption === 'recommended' ? recommendedRoute : alternativeRoute || recommendedRoute)!}
+                  shelter={selectedShelter}
+                  currentStepIndex={navStepIndex}
+                  remainingDistanceMeters={navRemainingMeters}
+                  remainingDurationMinutes={navRemainingMins}
+                  lang={lang}
+                  onExit={handleExitNavigation}
+                />
+              ) : (
+                <EvacuationRoutePanel
+                  recommendedRoute={recommendedRoute}
+                  alternativeRoute={alternativeRoute}
+                  selectedShelter={selectedShelter}
+                  onSelectRouteOption={(opt) => setActiveRouteOption(opt)}
+                  activeOption={activeRouteOption}
+                  onClearRoute={() => {
+                    setRecommendedRoute(null);
+                    setAlternativeRoute(null);
+                  }}
+                  onClose={() => setIsPanelCollapsed(true)}
+                  lang={lang}
+                  isDesktopPanel={true}
+                  onCollapse={() => setIsPanelCollapsed(true)}
+                  onBrowseShelters={() => setDesktopTab('shelters')}
+                  onStartNavigation={handleStartNavigation}
+                  isGpsAvailable={!!userLocation}
+                />
+              )
             )}
 
             {desktopTab === 'stats' && (
@@ -611,11 +739,13 @@ function FloodSosApp() {
             onSelectShelter={handleSelectShelter}
             onMapClick={handleMapClick}
             userLocation={userLocation}
+            locateTrigger={locateTrigger}
             lang={lang}
             hoveredShelterId={hoveredShelterId}
             onMapReady={(map) => {
               mapRef.current = map;
             }}
+            navigationState={navigationState}
           />
         </div>
       </div>
@@ -623,8 +753,13 @@ function FloodSosApp() {
       {/* 4. Bottom-Right Floating Controls Stack:
              - Phone stack: province filter, layers, locate (12px gaps)
              - Tablet & Desktop stack: province filter, layers, locate, zoom in, zoom out (12px gaps)
-             - Sits above the bump: bottom = --nav-h + --nav-bump + 12px + safe-area */}
-      <div className="fixed bottom-[calc(var(--nav-h)+var(--nav-bump)+12px+env(safe-area-inset-bottom,0px))] sm:bottom-[calc(var(--nav-h)+var(--nav-bump)+12px+env(safe-area-inset-bottom,0px))] lg:bottom-6 right-3.5 sm:right-4 lg:right-6 z-25 flex flex-col items-center gap-3">
+             - Sits above the bump: bottom = --nav-h + --nav-bump + 12px + safe-area
+             - Hidden on phone & tablet (<1024px) during navigation */}
+      <div
+        className={`fixed bottom-[calc(var(--nav-h)+var(--nav-bump)+12px+env(safe-area-inset-bottom,0px))] sm:bottom-[calc(var(--nav-h)+var(--nav-bump)+12px+env(safe-area-inset-bottom,0px))] lg:bottom-6 right-3.5 sm:right-4 lg:right-6 z-25 flex-col items-center gap-3 ${
+          isNavigating ? 'hidden lg:flex' : 'flex'
+        }`}
+      >
         {/* 1) Province Filter Button (top of the right-side floating stack) */}
         <ProvinceFilterButton
           selectedProvince={selectedProvince}
@@ -647,12 +782,17 @@ function FloodSosApp() {
 
         {/* 3) My Location GPS FAB (44px on phone/tablet, 52px on desktop) */}
         <button
-          onClick={handleLocateUser}
-          className="w-11 h-11 sm:w-11 sm:h-11 lg:w-[52px] lg:h-[52px] min-h-[44px] min-w-[44px] lg:min-h-[52px] lg:min-w-[52px] bg-white/95 hover:bg-white text-slate-800 rounded-full shadow-xl border border-slate-200/90 flex items-center justify-center transition-all hover:scale-105 active:scale-95 group backdrop-blur-md"
+          onClick={() => handleLocateUser(false)}
+          disabled={isLocating}
+          className="w-11 h-11 sm:w-11 sm:h-11 lg:w-[52px] lg:h-[52px] min-h-[44px] min-w-[44px] lg:min-h-[52px] lg:min-w-[52px] bg-white/95 hover:bg-white disabled:bg-slate-100 text-slate-800 rounded-full shadow-xl border border-slate-200/90 flex items-center justify-center transition-all hover:scale-105 active:scale-95 disabled:scale-100 group backdrop-blur-md"
           title={lang === 'th' ? 'ตำแหน่งปัจจุบันของฉัน' : 'Locate My Position'}
           aria-label={lang === 'th' ? 'ตำแหน่งปัจจุบันของฉัน' : 'Locate My Position'}
         >
-          <NavigationIcon className="w-5 h-5 lg:w-6 lg:h-6 text-sky-600 transition-transform group-hover:rotate-45" />
+          {isLocating ? (
+            <Loader2 className="w-5 h-5 lg:w-6 lg:h-6 text-sky-600 animate-spin" />
+          ) : (
+            <NavigationIcon className="w-5 h-5 lg:w-6 lg:h-6 text-sky-600 transition-transform group-hover:rotate-45" />
+          )}
         </button>
 
         {/* 4) Custom Zoom In FAB (Tablet & Desktop: 44px tablet, 52px desktop) */}
@@ -676,12 +816,11 @@ function FloodSosApp() {
         </button>
       </div>
 
-      {/* 5. Bottom-Left Map Legend:
-             - Collapsed 44px round info button on all screens
-             - Sits above the bump: bottom = --nav-h + --nav-bump + 12px + safe-area
-             - Shifted right of rail/panel on desktop so it never overlaps */}
+      {/* 5. Bottom-Left Map Legend (Hidden on phone & tablet during navigation) */}
       <div
         className={`fixed z-25 transition-all duration-200 ${
+          isNavigating ? 'hidden lg:block' : 'block'
+        } ${
           isDesktopPanelOpen
             ? 'bottom-[calc(var(--nav-h)+var(--nav-bump)+12px+env(safe-area-inset-bottom,0px))] left-3.5 sm:bottom-[calc(var(--nav-h)+var(--nav-bump)+12px+env(safe-area-inset-bottom,0px))] sm:left-4 lg:bottom-6 lg:left-[496px]'
             : 'bottom-[calc(var(--nav-h)+var(--nav-bump)+12px+env(safe-area-inset-bottom,0px))] left-3.5 sm:bottom-[calc(var(--nav-h)+var(--nav-bump)+12px+env(safe-area-inset-bottom,0px))] sm:left-4 lg:bottom-6 lg:left-[96px]'
@@ -744,9 +883,11 @@ function FloodSosApp() {
           <ShelterFinderPanel
             shelters={shelters}
             selectedProvince={selectedProvince}
+            userLocation={userLocation}
+            isLocating={isLocating}
             onSelectShelter={handleSelectShelter}
             onPlanRoute={handlePlanRoute}
-            onLocateUser={handleLocateUser}
+            onLocateUser={() => handleLocateUser(true)}
             onClose={() => setActivePanel('none')}
             onOpenAuth={() => {
               setAuthMode('signin');
@@ -758,7 +899,7 @@ function FloodSosApp() {
         )}
 
         {/* Evacuation Route Sheet */}
-        {activePanel === 'route' && recommendedRoute && (
+        {!isNavigating && activePanel === 'route' && recommendedRoute && (
           <EvacuationRoutePanel
             recommendedRoute={recommendedRoute}
             alternativeRoute={alternativeRoute}
@@ -772,6 +913,8 @@ function FloodSosApp() {
             }}
             onClose={() => setActivePanel('none')}
             lang={lang}
+            onStartNavigation={handleStartNavigation}
+            isGpsAvailable={!!userLocation}
           />
         )}
 
@@ -790,6 +933,44 @@ function FloodSosApp() {
           />
         )}
       </div>
+
+      {/* 8.5. Real-Time Turn-by-Turn Navigation Screen Overlay */}
+      {isNavigating && (activeRouteOption === 'recommended' ? recommendedRoute : alternativeRoute || recommendedRoute) && selectedShelter && (
+        <NavigationScreen
+          route={(activeRouteOption === 'recommended' ? recommendedRoute : alternativeRoute || recommendedRoute)!}
+          alternativeRoute={activeRouteOption === 'recommended' ? alternativeRoute : recommendedRoute}
+          shelter={selectedShelter}
+          floodAreas={floodAreas}
+          lang={lang}
+          initialUserLocation={userLocation}
+          isDemoMode={isDemoNavigation}
+          onExit={handleExitNavigation}
+          onRouteUpdated={(newRoute) => {
+            if (activeRouteOption === 'recommended') {
+              setRecommendedRoute(newRoute);
+            } else {
+              setAlternativeRoute(newRoute);
+            }
+          }}
+          onNavigationStateChange={(st) => {
+            setNavigationState(st);
+          }}
+          onProgressUpdate={(stepIdx, remMeters, remMins) => {
+            setNavStepIndex(stepIdx);
+            setNavRemainingMeters(remMeters);
+            setNavRemainingMins(remMins);
+          }}
+          onRecenterMap={(lat, lng) => {
+            mapRef.current?.setView([lat, lng], 17, { animate: true });
+          }}
+          onOverviewMap={(coords) => {
+            if (mapRef.current && coords.length > 1) {
+              const bounds = L.latLngBounds(coords.map((c) => L.latLng(c[0], c[1])));
+              mapRef.current.fitBounds(bounds, { padding: [60, 60] });
+            }
+          }}
+        />
+      )}
 
       {/* 9. Full-Width Stats View:
              - On mobile/tablet when viewMode === 'dashboard'

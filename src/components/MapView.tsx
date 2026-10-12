@@ -15,6 +15,7 @@ import {
   MAJOR_RIVERS,
 } from '../data/geoData';
 import { Language } from '../data/translations';
+import { NavigationState } from './NavigationScreen';
 
 interface MapViewProps {
   floodAreas: FloodRiskArea[];
@@ -30,10 +31,12 @@ interface MapViewProps {
   onSelectFloodArea: (area: FloodRiskArea | null) => void;
   onSelectShelter: (shelter: Shelter | null) => void;
   onMapClick: (lat: number, lng: number) => void;
-  userLocation: { lat: number; lng: number } | null;
+  userLocation: { lat: number; lng: number; accuracy?: number } | null;
+  locateTrigger?: number;
   lang: Language;
   hoveredShelterId?: string | null;
   onMapReady?: (map: L.Map) => void;
+  navigationState?: NavigationState | null;
 }
 
 export const MapView: React.FC<MapViewProps> = ({
@@ -51,9 +54,11 @@ export const MapView: React.FC<MapViewProps> = ({
   onSelectShelter,
   onMapClick,
   userLocation,
+  locateTrigger,
   lang,
   hoveredShelterId,
   onMapReady,
+  navigationState,
 }) => {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
@@ -67,7 +72,7 @@ export const MapView: React.FC<MapViewProps> = ({
   const routeLayerGroupRef = useRef<L.LayerGroup | null>(null);
   const userLocLayerGroupRef = useRef<L.LayerGroup | null>(null);
 
-  // Initialize Map
+  // Initialize Map (without hard maxBounds lock so user can navigate/locate freely)
   useEffect(() => {
     if (!mapContainerRef.current || mapRef.current) return;
 
@@ -78,10 +83,8 @@ export const MapView: React.FC<MapViewProps> = ({
     const map = L.map(mapContainerRef.current, {
       center: [18.9, 99.8],
       zoom: 9,
-      minZoom: 8,
+      minZoom: 6,
       maxZoom: 18,
-      maxBounds: NORTHERN_BOUNDS,
-      maxBoundsViscosity: 1.0,
       zoomSnap: 1,
       zoomDelta: 1,
       zoomControl: false,
@@ -131,10 +134,7 @@ export const MapView: React.FC<MapViewProps> = ({
     let url = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
     let attribution = '&copy; OpenStreetMap contributors';
 
-    if (basemap === 'dark') {
-      url = 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png';
-      attribution = '&copy; CartoDB Dark Matter';
-    } else if (basemap === 'satellite') {
+    if (basemap === 'satellite') {
       url =
         'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
       attribution = '&copy; Esri World Imagery';
@@ -178,7 +178,7 @@ export const MapView: React.FC<MapViewProps> = ({
 
     MAJOR_RIVERS.forEach((river) => {
       const poly = L.polyline(river.path, {
-        color: basemap === 'dark' ? '#38bdf8' : '#0284c7',
+        color: '#0284c7',
         weight: 3.5,
         opacity: 0.85,
         dashArray: '8, 4',
@@ -552,7 +552,22 @@ export const MapView: React.FC<MapViewProps> = ({
     }
   }, [shelters, selectedShelter, hoveredShelterId, layers.shelters, zoomLevel, lang, onSelectShelter]);
 
-  // Render Evacuation Route
+  // Drag detection during navigation
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const handleDragStart = () => {
+      if (navigationState?.isNavigating) {
+        navigationState.onUserPannedMap?.();
+      }
+    };
+    map.on('dragstart', handleDragStart);
+    return () => {
+      map.off('dragstart', handleDragStart);
+    };
+  }, [navigationState?.isNavigating]);
+
+  // Render Evacuation Route & Navigation Tracks
   useEffect(() => {
     const group = routeLayerGroupRef.current;
     if (!group) return;
@@ -562,6 +577,123 @@ export const MapView: React.FC<MapViewProps> = ({
 
     const isSafe = !activeRoute.hasFloodHazardOnRoute;
     const isDesktop = window.innerWidth >= 1024;
+
+    // Destination Marker with small anchored pill label
+    const destName = selectedShelter
+      ? (lang === 'th' ? selectedShelter.nameTh : selectedShelter.nameEn)
+      : (lang === 'th' ? 'ศูนย์พักพิงปลายทาง' : 'Destination Shelter');
+
+    const destFontSize = isDesktop ? '14px' : '12px';
+    const destPinDim = isDesktop ? 36 : 32;
+
+    const destIcon = L.divIcon({
+      className: 'dest-marker-container',
+      html: `
+        <div style="position: relative; display: flex; flex-direction: column; align-items: center;">
+          <div style="
+            position: absolute;
+            bottom: calc(100% + 4px);
+            background: rgba(15, 23, 42, 0.92);
+            color: #ffffff;
+            font-size: ${destFontSize};
+            font-weight: 700;
+            line-height: 1.2;
+            padding: 3px 8px;
+            border-radius: 9999px;
+            max-width: 200px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.35);
+            border: 1px solid rgba(255,255,255,0.25);
+            pointer-events: auto;
+            text-align: center;
+          " title="${destName}">
+            ${destName}
+          </div>
+          <div style="
+            background: #059669;
+            color: white;
+            width: ${destPinDim}px;
+            height: ${destPinDim}px;
+            border-radius: 50%;
+            border: 3px solid white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 4px 14px rgba(5,150,105,0.6);
+            font-weight: 900;
+            font-size: ${isDesktop ? '16px' : '14px'};
+          ">
+            ★
+          </div>
+        </div>
+      `,
+      iconSize: [destPinDim, destPinDim],
+      iconAnchor: [destPinDim / 2, destPinDim / 2],
+    });
+    const destMarker = L.marker(activeRoute.destination, { icon: destIcon });
+    destMarker.bindTooltip(destName, {
+      direction: 'top',
+      className: 'bg-emerald-950 text-white rounded-lg px-2.5 py-1 text-xs font-semibold'
+    });
+    group.addLayer(destMarker);
+
+    // MODE A: Turn-by-Turn Navigation Active
+    if (navigationState?.isNavigating) {
+      // 1. Traveled path in muted gray
+      if (navigationState.traveledCoordinates.length > 1) {
+        const traveledLine = L.polyline(navigationState.traveledCoordinates, {
+          color: '#64748b',
+          weight: isDesktop ? 7 : 6,
+          opacity: 0.85,
+          lineCap: 'round',
+          lineJoin: 'round',
+        });
+        group.addLayer(traveledLine);
+      }
+
+      // 2. Remaining path in brand color (green safe / rose hazard)
+      if (navigationState.remainingCoordinates.length > 1) {
+        const remainingLine = L.polyline(navigationState.remainingCoordinates, {
+          color: isSafe ? '#10b981' : '#f43f5e',
+          weight: isDesktop ? 7 : 6,
+          opacity: 0.95,
+          lineCap: 'round',
+          lineJoin: 'round',
+        });
+        group.addLayer(remainingLine);
+      }
+
+      // 3. Navigation User Marker with directional arrow pointing in travel bearing
+      const puckHtml = `
+        <div style="position: relative; width: 48px; height: 48px; display: flex; align-items: center; justify-content: center;">
+          <div style="position: absolute; width: 38px; height: 38px; border-radius: 50%; background: rgba(2, 132, 199, 0.25); animation: ping 1.8s cubic-bezier(0, 0, 0.2, 1) infinite;"></div>
+          <div style="width: 36px; height: 36px; border-radius: 50%; background: #0284c7; border: 3px solid white; box-shadow: 0 4px 14px rgba(2,132,199,0.5); display: flex; align-items: center; justify-content: center; transform: rotate(${navigationState.userHeading}deg); transition: transform 0.25s ease-out;">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="white">
+              <polygon points="12 2 19 21 12 17 5 21 12 2"/>
+            </svg>
+          </div>
+        </div>
+      `;
+      const puckIcon = L.divIcon({
+        className: 'nav-puck-marker',
+        html: puckHtml,
+        iconSize: [48, 48],
+        iconAnchor: [24, 24],
+      });
+      const puckMarker = L.marker(navigationState.userPosition, { icon: puckIcon, zIndexOffset: 2000 });
+      group.addLayer(puckMarker);
+
+      // 4. Smooth map follow
+      if (mapRef.current && navigationState.isFollowingUser) {
+        mapRef.current.setView(navigationState.userPosition, 17, { animate: true });
+      }
+
+      return;
+    }
+
+    // MODE B: Standard Route Preview
     const polyline = L.polyline(activeRoute.coordinates, {
       color: isSafe ? '#10b981' : '#f43f5e',
       weight: isDesktop ? 6 : 5,
@@ -569,7 +701,6 @@ export const MapView: React.FC<MapViewProps> = ({
       lineCap: 'round',
       lineJoin: 'round',
     });
-
     group.addLayer(polyline);
 
     // Origin Marker (User location)
@@ -600,88 +731,30 @@ export const MapView: React.FC<MapViewProps> = ({
     originMarker.bindTooltip(lang === 'th' ? 'จุดเริ่มต้น (ผู้ประสบภัย)' : 'Start Location');
     group.addLayer(originMarker);
 
-    // Destination Marker with small anchored pill label (max-width 200px, 14px text on desktop, 12px on phone/tablet, ellipsis)
-    const destName = selectedShelter
-      ? (lang === 'th' ? selectedShelter.nameTh : selectedShelter.nameEn)
-      : (lang === 'th' ? 'ศูนย์พักพิงปลายทาง' : 'Destination Shelter');
-
-    const destFontSize = isDesktop ? '14px' : '12px';
-    const destPinDim = isDesktop ? 36 : 32;
-
-    const destIcon = L.divIcon({
-      className: 'dest-marker-container',
-      html: `
-        <div style="position: relative; display: flex; flex-direction: column; align-items: center;">
-          <!-- Anchored small pill destination label (max-width 200px, 14px on desktop / 12px on phone, one line ellipsis) -->
-          <div style="
-            position: absolute;
-            bottom: calc(100% + 4px);
-            background: rgba(15, 23, 42, 0.92);
-            color: #ffffff;
-            font-size: ${destFontSize};
-            font-weight: 700;
-            line-height: 1.2;
-            padding: 3px 8px;
-            border-radius: 9999px;
-            max-width: 200px;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.35);
-            border: 1px solid rgba(255,255,255,0.25);
-            pointer-events: auto;
-            text-align: center;
-          " title="${destName}">
-            ${destName}
-          </div>
-
-          <!-- Destination Star Pin -->
-          <div style="
-            background: #059669;
-            color: white;
-            width: ${destPinDim}px;
-            height: ${destPinDim}px;
-            border-radius: 50%;
-            border: 3px solid white;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            box-shadow: 0 4px 14px rgba(5,150,105,0.6);
-            font-weight: 900;
-            font-size: ${isDesktop ? '16px' : '14px'};
-          ">
-            ★
-          </div>
-        </div>
-      `,
-      iconSize: [destPinDim, destPinDim],
-      iconAnchor: [destPinDim / 2, destPinDim / 2],
-    });
-    const destMarker = L.marker(activeRoute.destination, { icon: destIcon });
-    destMarker.bindTooltip(destName, {
-      direction: 'top',
-      className: 'bg-emerald-950 text-white rounded-lg px-2.5 py-1 text-xs font-semibold'
-    });
-    group.addLayer(destMarker);
-
     if (mapRef.current) {
       mapRef.current.fitBounds(polyline.getBounds(), {
         padding: [60, 60],
         maxZoom: 14,
       });
     }
-  }, [activeRoute, lang]);
+  }, [activeRoute, lang, selectedShelter, navigationState]);
 
-  // Render User Location
+  // Render User Location & Handle Locate Fly-To
   useEffect(() => {
     const group = userLocLayerGroupRef.current;
     if (!group) return;
     group.clearLayers();
 
-    if (!userLocation) return;
+    // If navigation is active, hide standard blue dot to prevent double-rendering with the navigation arrow puck
+    if (!userLocation || navigationState?.isNavigating) return;
+
+    // Use the real accuracy as circle radius (default to 20m if not provided)
+    const accuracyRadius = userLocation.accuracy && userLocation.accuracy > 0
+      ? userLocation.accuracy
+      : 25;
 
     const radar = L.circle([userLocation.lat, userLocation.lng], {
-      radius: 500,
+      radius: accuracyRadius,
       color: '#0284c7',
       fillColor: '#38bdf8',
       fillOpacity: 0.22,
@@ -689,16 +762,25 @@ export const MapView: React.FC<MapViewProps> = ({
     });
     group.addLayer(radar);
 
+    // Blue dot with white ring
     const pin = L.circleMarker([userLocation.lat, userLocation.lng], {
-      radius: 8,
+      radius: 7,
       color: '#ffffff',
-      fillColor: '#0284c7',
+      fillColor: '#2563eb',
       fillOpacity: 1,
-      weight: 3,
+      weight: 2.5,
     });
     pin.bindTooltip(lang === 'th' ? 'ตำแหน่งปัจจุบันของคุณ' : 'Your Location');
     group.addLayer(pin);
   }, [userLocation, lang]);
+
+  // Fly to user position at zoom 14 whenever locateTrigger is incremented
+  useEffect(() => {
+    if (!locateTrigger || !userLocation || !mapRef.current) return;
+    mapRef.current.flyTo([userLocation.lat, userLocation.lng], 14, {
+      duration: 1.2,
+    });
+  }, [locateTrigger]);
 
   return (
     <div className="relative w-full h-full">

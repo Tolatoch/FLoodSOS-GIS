@@ -90,10 +90,40 @@ export const LayerControl: React.FC<LayerControlProps> = ({
     }, 800);
   };
 
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const [coords, setCoords] = useState<{ right: number; top: number } | null>(null);
+
+  // Compute position relative to the button on desktop
+  useEffect(() => {
+    if (!open) return;
+    const updateCoords = () => {
+      if (!buttonRef.current || window.innerWidth < 1024) {
+        setCoords(null);
+        return;
+      }
+      const rect = buttonRef.current.getBoundingClientRect();
+      const right = window.innerWidth - rect.left + 12; // 12px gap to the left of the button
+      const estimatedHeight = 490;
+      let top = rect.bottom - estimatedHeight;
+      if (top < 80) {
+        top = 80; // never higher than 80px from top
+      }
+      if (top + estimatedHeight > window.innerHeight - 16) {
+        top = Math.max(80, window.innerHeight - 16 - estimatedHeight);
+      }
+      setCoords({ right, top });
+    };
+
+    updateCoords();
+    window.addEventListener('resize', updateCoords);
+    return () => window.removeEventListener('resize', updateCoords);
+  }, [open]);
+
   return (
     <div className="relative" ref={containerRef}>
       {/* 44px round on phone/tablet, 52px on desktop */}
       <button
+        ref={buttonRef}
         onClick={() => setOpen(!open)}
         className="w-11 h-11 sm:w-11 sm:h-11 lg:w-[52px] lg:h-[52px] min-h-[44px] min-w-[44px] lg:min-h-[52px] lg:min-w-[52px] bg-white/95 hover:bg-white text-slate-800 rounded-full shadow-xl border border-slate-200/90 flex items-center justify-center transition-all hover:scale-105 active:scale-95 group backdrop-blur-md"
         title={t.layers}
@@ -103,9 +133,29 @@ export const LayerControl: React.FC<LayerControlProps> = ({
         <Layers className={`w-5 h-5 lg:w-6 lg:h-6 text-sky-600 transition-transform ${open ? 'rotate-90' : ''}`} />
       </button>
 
-      {/* Expanded Layer & GISTDA Feed Sheet - opens as a card next to the button, not over legend */}
+      {/* Expanded Layer & GISTDA Feed Sheet:
+          - Phone & tablet (< 1024px): bottom sheet inset-x-3
+          - Desktop (>= 1024px): fixed-position layer to the LEFT of the layers button (12px gap),
+            clamped inside viewport: 16px margin on every side, never higher than 80px from top,
+            max-height calc(100dvh - 96px), scroll inside the card so all layer rows and satellite section are reachable.
+            Never overlaps globe/account buttons, legend button, left rail or left panel. */}
       {open && (
-        <div className="fixed inset-x-3 bottom-20 sm:fixed-none sm:absolute sm:right-full sm:mr-3 sm:bottom-0 sm:inset-x-auto w-auto sm:w-[320px] max-h-[75vh] sm:max-h-[82vh] bg-white/98 backdrop-blur-xl rounded-3xl shadow-2xl border border-slate-200/90 p-4 z-50 overflow-y-auto animate-in fade-in slide-in-from-bottom-4 sm:slide-in-from-right-2 no-scrollbar">
+        <div
+          className="fixed z-50 bg-white/98 backdrop-blur-xl rounded-3xl shadow-2xl border border-slate-200/90 p-4 overflow-y-auto no-scrollbar animate-in fade-in
+            max-lg:inset-x-3 max-lg:bottom-[calc(var(--nav-h)+var(--nav-bump)+12px+env(safe-area-inset-bottom,0px)+60px)] max-lg:max-h-[calc(100dvh-200px)]
+            lg:w-[320px]"
+          style={
+            coords
+              ? {
+                  right: `${coords.right}px`,
+                  top: `${coords.top}px`,
+                  maxHeight: 'calc(100dvh - 96px)',
+                }
+              : {
+                  maxHeight: 'min(calc(100dvh - 96px), calc(100dvh - 80px - 16px))',
+                }
+          }
+        >
           {/* Header */}
           <div className="flex items-center justify-between pb-2.5 mb-3 border-b border-slate-100">
             <div className="flex items-center gap-2">
@@ -284,12 +334,12 @@ export const LayerControl: React.FC<LayerControlProps> = ({
             </label>
           </div>
 
-          {/* 3. Basemap Selector */}
+          {/* 3. Basemap Selector (Light OpenStreetMap, Terrain, Satellite - Dark option removed) */}
           <div className="pt-2.5 border-t border-slate-100">
             <span className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-2">
               {t.basemap}
             </span>
-            <div className="grid grid-cols-4 gap-1.5">
+            <div className="grid grid-cols-3 gap-1.5">
               <button
                 onClick={() => onChangeBasemap('osm')}
                 className={`py-2 px-1 text-[11px] font-semibold rounded-xl border text-center transition-all min-h-[40px] flex flex-col items-center justify-center ${
@@ -299,16 +349,6 @@ export const LayerControl: React.FC<LayerControlProps> = ({
                 }`}
               >
                 OSM
-              </button>
-              <button
-                onClick={() => onChangeBasemap('dark')}
-                className={`py-2 px-1 text-[11px] font-semibold rounded-xl border text-center transition-all min-h-[40px] flex flex-col items-center justify-center ${
-                  basemap === 'dark'
-                    ? 'bg-slate-900 border-slate-900 text-white shadow-sm font-bold'
-                    : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
-                }`}
-              >
-                Dark
               </button>
               <button
                 onClick={() => onChangeBasemap('terrain')}

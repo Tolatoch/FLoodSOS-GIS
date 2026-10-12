@@ -25,6 +25,8 @@ interface EvacuationRoutePanelProps {
   isDesktopPanel?: boolean;
   onCollapse?: () => void;
   onBrowseShelters?: () => void;
+  onStartNavigation: (isDemo: boolean) => void;
+  isGpsAvailable?: boolean;
 }
 
 export const EvacuationRoutePanel: React.FC<EvacuationRoutePanelProps> = ({
@@ -39,9 +41,11 @@ export const EvacuationRoutePanel: React.FC<EvacuationRoutePanelProps> = ({
   isDesktopPanel = false,
   onCollapse,
   onBrowseShelters,
+  onStartNavigation,
+  isGpsAvailable = true,
 }) => {
   const t = TRANSLATIONS[lang];
-  const [navigating, setNavigating] = useState(false);
+  const [isDemoMode, setIsDemoMode] = useState<boolean>(false);
 
   // 3 Bottom Sheet States on Phone
   const [sheetState, setSheetState] = useState<'peek' | 'half' | 'full'>('half');
@@ -266,6 +270,18 @@ export const EvacuationRoutePanel: React.FC<EvacuationRoutePanelProps> = ({
 
       {/* Turn-by-Turn Navigation Steps */}
       <div className="p-2.5 sm:p-3 overflow-y-auto space-y-2 flex-1 text-xs sm:text-sm">
+        {/* GPS manual origin hint if GPS unavailable */}
+        {!isGpsAvailable && (
+          <div className="p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs flex items-center gap-2 mb-2">
+            <span className="text-base shrink-0">📍</span>
+            <span>
+              {lang === 'th'
+                ? 'แตะบนแผนที่เพื่อระบุจุดเริ่มต้น (หมุด A)'
+                : 'Tap anywhere on the map to set start point (Marker A)'}
+            </span>
+          </div>
+        )}
+
         <h4 className="font-bold text-slate-800 text-[11px] sm:text-xs uppercase tracking-wider mb-2 font-['Prompt']">
           {t.routing.stepByStep}
         </h4>
@@ -294,10 +310,17 @@ export const EvacuationRoutePanel: React.FC<EvacuationRoutePanelProps> = ({
               <p className="font-semibold leading-relaxed text-xs sm:text-sm">
                 {lang === 'th' ? step.instructionTh : step.instructionEn}
               </p>
+              {/* Hide "0 นาที" for steps under a minute (show distance only) */}
               <div className="flex items-center gap-2 mt-1 text-[10px] sm:text-[11px] text-slate-400">
-                <span>{step.distanceMeters} ม.</span>
-                <span>•</span>
-                <span>{Math.round(step.durationSeconds / 60)} นาที</span>
+                <span>{step.distanceMeters} {lang === 'th' ? 'ม.' : 'm'}</span>
+                {step.durationSeconds >= 60 && (
+                  <>
+                    <span>•</span>
+                    <span>
+                      {Math.round(step.durationSeconds / 60)} {lang === 'th' ? 'นาที' : 'min'}
+                    </span>
+                  </>
+                )}
               </div>
             </div>
           </div>
@@ -308,22 +331,37 @@ export const EvacuationRoutePanel: React.FC<EvacuationRoutePanelProps> = ({
       <div className="p-2.5 sm:p-3 border-t border-slate-200/80 bg-white flex items-center gap-2 shrink-0">
         <button
           onClick={onClearRoute}
-          className="h-11 w-11 min-h-[44px] min-w-[44px] bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl flex items-center justify-center transition-colors"
+          className="h-11 w-11 min-h-[44px] min-w-[44px] bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl flex items-center justify-center transition-colors shrink-0"
           title={t.routing.clearRoute}
+          aria-label={t.routing.clearRoute}
         >
           <RotateCcw className="w-4 h-4 sm:w-[18px] sm:h-[18px]" />
         </button>
 
+        {/* Demo Simulation Toggle */}
         <button
-          onClick={() => setNavigating(!navigating)}
-          className={`flex-1 h-11 min-h-[44px] px-4 font-bold text-sm sm:text-[15px] rounded-xl flex items-center justify-center gap-2 transition-all ${
-            navigating
-              ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-500/30'
-              : 'bg-sky-600 hover:bg-sky-700 text-white shadow-md'
+          type="button"
+          onClick={() => setIsDemoMode(!isDemoMode)}
+          className={`h-11 min-h-[44px] px-3 rounded-xl text-xs font-bold border flex items-center gap-1.5 transition-all shrink-0 ${
+            isDemoMode
+              ? 'bg-amber-500 text-white border-amber-600 shadow-sm ring-2 ring-amber-400/30'
+              : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200'
           }`}
+          title={lang === 'th' ? 'Demo: จำลองการเดินทาง' : 'Demo: Simulate Navigation'}
+          aria-label={lang === 'th' ? 'Demo: จำลองการเดินทาง' : 'Demo: Simulate Navigation'}
+        >
+          <span className={`w-2 h-2 rounded-full ${isDemoMode ? 'bg-white animate-ping' : 'bg-amber-500'}`} />
+          <span className="hidden xs:inline">Demo:</span>
+          <span>{lang === 'th' ? 'จำลอง' : 'Simulate'}</span>
+        </button>
+
+        {/* Start Navigation Button */}
+        <button
+          onClick={() => onStartNavigation(isDemoMode)}
+          className="flex-1 h-11 min-h-[44px] px-3 sm:px-4 font-bold text-sm sm:text-[15px] rounded-xl flex items-center justify-center gap-2 bg-sky-600 hover:bg-sky-700 active:bg-sky-800 text-white shadow-md active:scale-98 transition-all"
         >
           <Navigation className="w-4 h-4 sm:w-[18px] sm:h-[18px]" />
-          <span>{navigating ? 'กำลังนำทาง (GPS Active)' : t.routing.navigateNow}</span>
+          <span className="truncate">{lang === 'th' ? 'เริ่มการนำทาง' : 'Start navigation'}</span>
         </button>
       </div>
     </div>

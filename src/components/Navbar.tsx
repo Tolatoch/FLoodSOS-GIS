@@ -28,6 +28,7 @@ interface NavbarProps {
   onSignOut: () => void;
   onOpenProfile?: () => void;
   onOpenSavedShelters?: () => void;
+  hideBottomNav?: boolean;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -43,6 +44,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onSignOut,
   onOpenProfile,
   onOpenSavedShelters,
+  hideBottomNav = false,
 }) => {
   const t = TRANSLATIONS[lang];
 
@@ -359,6 +361,8 @@ export const Navbar: React.FC<NavbarProps> = ({
         ];
 
         const ActiveIcon = navItems[activeIndex]?.icon || Compass;
+
+        if (hideBottomNav) return null;
 
         return (
           <nav

@@ -119,17 +119,56 @@ async function fetchOsrmRoute(
           const modifier = step.maneuver?.modifier || '';
           let icon: RouteStep['icon'] = 'straight';
           if (type.includes('arrive') || type === 'destination') icon = 'destination';
+          else if (modifier.includes('u-turn') || type.includes('u-turn')) icon = 'u-turn';
+          else if (modifier === 'slight left') icon = 'slight-left';
+          else if (modifier === 'slight right') icon = 'slight-right';
           else if (modifier.includes('left')) icon = 'turn-left';
           else if (modifier.includes('right')) icon = 'turn-right';
 
-          const street = step.name || 'ถนนสายหลัก';
+          const street = step.name || (type.includes('arrive') ? 'ศูนย์พักพิงปลายทาง' : 'ถนนสายหลัก');
+          const streetEn = step.name || (type.includes('arrive') ? 'Destination Shelter' : 'Main Road');
+
+          let instructionTh = `ตรงไปตาม ${street}`;
+          let instructionEn = `Continue along ${streetEn}`;
+
+          if (type.includes('arrive') || type === 'destination') {
+            instructionTh = `ถึงจุดหมาย: ${street}`;
+            instructionEn = `Arrive at destination: ${streetEn}`;
+          } else if (type === 'depart') {
+            instructionTh = `ออกเดินทางมุ่งหน้าตาม ${street}`;
+            instructionEn = `Head along ${streetEn}`;
+          } else if (modifier === 'slight left') {
+            instructionTh = `เบี่ยงซ้ายเข้าสู่ ${street}`;
+            instructionEn = `Slight left onto ${streetEn}`;
+          } else if (modifier === 'slight right') {
+            instructionTh = `เบี่ยงขวาเข้าสู่ ${street}`;
+            instructionEn = `Slight right onto ${streetEn}`;
+          } else if (modifier.includes('u-turn')) {
+            instructionTh = `กลับรถเข้าสู่ ${street}`;
+            instructionEn = `Make a U-turn onto ${streetEn}`;
+          } else if (modifier.includes('left')) {
+            instructionTh = `เลี้ยวซ้ายเข้าสู่ ${street}`;
+            instructionEn = `Turn left onto ${streetEn}`;
+          } else if (modifier.includes('right')) {
+            instructionTh = `เลี้ยวขวาเข้าสู่ ${street}`;
+            instructionEn = `Turn right onto ${streetEn}`;
+          } else if (type.includes('roundabout')) {
+            instructionTh = `เข้าสู่วงเวียนมุ่งหน้าสู่ ${street}`;
+            instructionEn = `At roundabout, continue onto ${streetEn}`;
+          }
+
+          const loc: [number, number] | undefined = step.maneuver?.location
+            ? [step.maneuver.location[1], step.maneuver.location[0]]
+            : undefined;
+
           steps.push({
-            instructionTh: `${step.maneuver?.instruction || `มุ่งหน้าไปตาม ${street}`}`,
-            instructionEn: `${step.maneuver?.instruction || `Proceed along ${street}`}`,
+            instructionTh,
+            instructionEn,
             distanceMeters: Math.round(step.distance || 100),
             durationSeconds: Math.round(step.duration || 30),
             icon,
             roadName: street,
+            location: loc,
           });
         }
       }
@@ -139,12 +178,230 @@ async function fetchOsrmRoute(
       coordinates,
       distanceKm,
       durationMinutes,
-      steps: steps.slice(0, 8), // Clean readable summary
+      steps: steps.length > 0 ? steps : [],
     };
   } catch (err) {
     console.warn('OSRM router fetch failed, falling back to local road topology:', err);
     return null;
   }
+}
+
+// Calculate Haversine distance in meters
+export function haversineDistanceMeters(
+  coord1: [number, number],
+  coord2: [number, number]
+): number {
+  return haversineDistance(coord1, coord2) * 1000;
+}
+
+// Bearing angle in degrees (0 = North, 90 = East, 180 = South, 270 = West)
+export function getBearing(
+  from: [number, number],
+  to: [number, number]
+): number {
+  const lat1 = (from[0] * Math.PI) / 180;
+  const lat2 = (to[0] * Math.PI) / 180;
+  const dLon = ((to[1] - from[1]) * Math.PI) / 180;
+
+  const y = Math.sin(dLon) * Math.cos(lat2);
+  const x =
+    Math.cos(lat1) * Math.sin(lat2) -
+    Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon);
+
+  const brng = (Math.atan2(y, x) * 180) / Math.PI;
+  return (brng + 360) % 360;
+}
+
+// Project point P onto line segment AB (meters approximation for local area)
+export function projectPointOntoSegment(
+  p: [number, number],
+  a: [number, number],
+  b: [number, number]
+): { point: [number, number]; distanceMeters: number; t: number } {
+  const midLat = ((a[0] + b[0]) / 2) * (Math.PI / 180);
+  const cosMidLat = Math.cos(midLat);
+
+  // Convert to local Cartesian meters relative to A
+  const mPerLat = 110574;
+  const mPerLng = 111320 * cosMidLat;
+
+  const bX = (b[1] - a[1]) * mPerLng;
+  const bY = (b[0] - a[0]) * mPerLat;
+
+  const pX = (p[1] - a[1]) * mPerLng;
+  const pY = (p[0] - a[0]) * mPerLat;
+
+  const lenSq = bX * bX + bY * bY;
+  if (lenSq === 0) {
+    const dist = Math.sqrt(pX * pX + pY * pY);
+    return { point: a, distanceMeters: dist, t: 0 };
+  }
+
+  let t = (pX * bX + pY * bY) / lenSq;
+  t = Math.max(0, Math.min(1, t));
+
+  const projX = t * bX;
+  const projY = t * bY;
+
+  const projLng = a[1] + projX / mPerLng;
+  const projLat = a[0] + projY / mPerLat;
+
+  const dx = pX - projX;
+  const dy = pY - projY;
+  const distanceMeters = Math.sqrt(dx * dx + dy * dy);
+
+  return { point: [projLat, projLng], distanceMeters, t };
+}
+
+// Total length of polyline in meters
+export function calculatePolylineLengthMeters(polyline: [number, number][]): number {
+  let total = 0;
+  for (let i = 0; i < polyline.length - 1; i++) {
+    total += haversineDistanceMeters(polyline[i], polyline[i + 1]);
+  }
+  return total;
+}
+
+// Snap point to polyline, return snapped coordinates, distance to route, distance along route, and bearing
+export function snapPointToPolyline(
+  point: [number, number],
+  polyline: [number, number][]
+): {
+  snappedPoint: [number, number];
+  segmentIndex: number;
+  distanceToRouteMeters: number;
+  distanceAlongRouteMeters: number;
+  bearing: number;
+} {
+  if (polyline.length === 0) {
+    return {
+      snappedPoint: point,
+      segmentIndex: 0,
+      distanceToRouteMeters: 0,
+      distanceAlongRouteMeters: 0,
+      bearing: 0,
+    };
+  }
+  if (polyline.length === 1) {
+    return {
+      snappedPoint: polyline[0],
+      segmentIndex: 0,
+      distanceToRouteMeters: haversineDistanceMeters(point, polyline[0]),
+      distanceAlongRouteMeters: 0,
+      bearing: 0,
+    };
+  }
+
+  let minDistance = Infinity;
+  let bestPoint = polyline[0];
+  let bestSegIndex = 0;
+  let bestDistAlong = 0;
+  let cumulativeDist = 0;
+
+  for (let i = 0; i < polyline.length - 1; i++) {
+    const a = polyline[i];
+    const b = polyline[i + 1];
+    const segLen = haversineDistanceMeters(a, b);
+    const proj = projectPointOntoSegment(point, a, b);
+
+    if (proj.distanceMeters < minDistance) {
+      minDistance = proj.distanceMeters;
+      bestPoint = proj.point;
+      bestSegIndex = i;
+      bestDistAlong = cumulativeDist + proj.t * segLen;
+    }
+    cumulativeDist += segLen;
+  }
+
+  const nextIdx = Math.min(bestSegIndex + 1, polyline.length - 1);
+  const bearing = getBearing(bestPoint, polyline[nextIdx] || bestPoint);
+
+  return {
+    snappedPoint: bestPoint,
+    segmentIndex: bestSegIndex,
+    distanceToRouteMeters: minDistance,
+    distanceAlongRouteMeters: bestDistAlong,
+    bearing,
+  };
+}
+
+// Split polyline into traveled and remaining parts
+export function splitPolylineAtDistance(
+  polyline: [number, number][],
+  distanceMeters: number,
+  currentPoint: [number, number]
+): {
+  traveled: [number, number][];
+  remaining: [number, number][];
+} {
+  if (polyline.length < 2) {
+    return { traveled: [currentPoint], remaining: [currentPoint] };
+  }
+
+  let cumulative = 0;
+  let splitIndex = 0;
+
+  for (let i = 0; i < polyline.length - 1; i++) {
+    const segLen = haversineDistanceMeters(polyline[i], polyline[i + 1]);
+    if (cumulative + segLen >= distanceMeters) {
+      splitIndex = i;
+      break;
+    }
+    cumulative += segLen;
+    splitIndex = i + 1;
+  }
+
+  const traveled: [number, number][] = polyline.slice(0, splitIndex + 1);
+  traveled.push(currentPoint);
+
+  const remaining: [number, number][] = [currentPoint, ...polyline.slice(splitIndex + 1)];
+
+  return { traveled, remaining };
+}
+
+// Interpolate position along polyline at distance (for Demo mode)
+export function interpolateAlongPolyline(
+  polyline: [number, number][],
+  distanceMeters: number
+): {
+  point: [number, number];
+  bearing: number;
+  segmentIndex: number;
+  isEnd: boolean;
+} {
+  if (polyline.length === 0) {
+    return { point: [0, 0], bearing: 0, segmentIndex: 0, isEnd: true };
+  }
+  if (polyline.length === 1 || distanceMeters <= 0) {
+    const brng = polyline.length > 1 ? getBearing(polyline[0], polyline[1]) : 0;
+    return { point: polyline[0], bearing: brng, segmentIndex: 0, isEnd: false };
+  }
+
+  let cumulative = 0;
+  for (let i = 0; i < polyline.length - 1; i++) {
+    const a = polyline[i];
+    const b = polyline[i + 1];
+    const segLen = haversineDistanceMeters(a, b);
+
+    if (cumulative + segLen >= distanceMeters) {
+      const remainingDist = distanceMeters - cumulative;
+      const t = segLen > 0 ? remainingDist / segLen : 0;
+      const lat = a[0] + t * (b[0] - a[0]);
+      const lng = a[1] + t * (b[1] - a[1]);
+      const brng = getBearing(a, b);
+      return { point: [lat, lng], bearing: brng, segmentIndex: i, isEnd: false };
+    }
+    cumulative += segLen;
+  }
+
+  const last = polyline[polyline.length - 1];
+  const secondLast = polyline[polyline.length - 2];
+  return {
+    point: last,
+    bearing: getBearing(secondLast, last),
+    segmentIndex: polyline.length - 2,
+    isEnd: true,
+  };
 }
 
 // Real northern road corridor nodes for fallback road-snapping if OSRM is temporarily unreachable

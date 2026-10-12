@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import {
   Home,
   Navigation,
@@ -13,9 +13,14 @@ import { Shelter, ShelterType, ProvinceId } from '../types';
 import { TRANSLATIONS, Language } from '../data/translations';
 import { useAuth } from '../context/AuthContext';
 
+import { Loader2 } from 'lucide-react';
+import { haversineDistance } from '../services/routingService';
+
 interface ShelterFinderPanelProps {
   shelters: (Shelter & { distanceKm?: number })[];
   selectedProvince: ProvinceId | 'all';
+  userLocation?: { lat: number; lng: number } | null;
+  isLocating?: boolean;
   onSelectShelter: (shelter: Shelter) => void;
   onPlanRoute: (shelter: Shelter) => void;
   onLocateUser: () => void;
@@ -69,6 +74,8 @@ function getFacilityLabel(f: string, lang: Language): string {
 export const ShelterFinderPanel: React.FC<ShelterFinderPanelProps> = ({
   shelters,
   selectedProvince,
+  userLocation,
+  isLocating = false,
   onSelectShelter,
   onPlanRoute,
   onLocateUser,
@@ -82,18 +89,35 @@ export const ShelterFinderPanel: React.FC<ShelterFinderPanelProps> = ({
 }) => {
   const t = TRANSLATIONS[lang];
   const { currentUser, isShelterSaved, toggleSaveShelter } = useAuth();
+  const listContainerRef = useRef<HTMLDivElement>(null);
+
+  // Calculate distance for all shelters when userLocation is known
+  const sheltersWithDistance = shelters.map((s) => {
+    let distanceKm = s.distanceKm;
+    if (userLocation) {
+      distanceKm = Math.round(haversineDistance([userLocation.lat, userLocation.lng], [s.lat, s.lng]) * 10) / 10;
+    }
+    return { ...s, distanceKm };
+  });
 
   // Filter shelters by province
-  const filtered = shelters.filter((s) => {
+  const filtered = sheltersWithDistance.filter((s) => {
     if (selectedProvince !== 'all' && s.province !== selectedProvince) return false;
     return true;
   });
 
   // Sort by nearest when GPS location is known (distanceKm present), otherwise in default order
-  const hasGpsDistance = shelters.some((s) => s.distanceKm !== undefined && s.distanceKm !== null);
+  const hasGpsDistance = userLocation != null || sheltersWithDistance.some((s) => s.distanceKm !== undefined && s.distanceKm !== null);
   if (hasGpsDistance) {
     filtered.sort((a, b) => (a.distanceKm ?? 9999) - (b.distanceKm ?? 9999));
   }
+
+  // Scroll to top of list when userLocation is updated
+  useEffect(() => {
+    if (userLocation && listContainerRef.current) {
+      listContainerRef.current.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  }, [userLocation]);
 
   const getShelterTypeLabel = (type: ShelterType) => {
     return t.shelterTypes[type] || type;
@@ -192,15 +216,25 @@ export const ShelterFinderPanel: React.FC<ShelterFinderPanelProps> = ({
       <div className="p-3 sm:p-3.5 border-b border-slate-100 bg-slate-50 shrink-0">
         <button
           onClick={onLocateUser}
-          className="w-full h-11 min-h-[44px] px-3 bg-sky-600 hover:bg-sky-700 text-white font-bold rounded-xl flex items-center justify-center gap-2 text-sm sm:text-[15px] shadow-sm transition-all active:scale-98"
+          disabled={isLocating}
+          className="w-full h-11 min-h-[44px] px-3 bg-sky-600 hover:bg-sky-700 disabled:bg-sky-400 text-white font-bold rounded-xl flex items-center justify-center gap-2 text-sm sm:text-[15px] shadow-sm transition-all active:scale-98 disabled:cursor-not-allowed"
         >
-          <MapPin className="w-4 h-4 sm:w-[18px] sm:h-[18px] animate-bounce shrink-0" />
-          <span>{t.shelterFinder.locateNearMe}</span>
+          {isLocating ? (
+            <>
+              <Loader2 className="w-4 h-4 sm:w-[18px] sm:h-[18px] animate-spin shrink-0" />
+              <span>{lang === 'th' ? 'กำลังระบุตำแหน่ง GPS...' : 'Locating GPS...'}</span>
+            </>
+          ) : (
+            <>
+              <MapPin className="w-4 h-4 sm:w-[18px] sm:h-[18px] animate-bounce shrink-0" />
+              <span>{t.shelterFinder.locateNearMe}</span>
+            </>
+          )}
         </button>
       </div>
 
       {/* Shelters List: sorted by nearest when GPS location is known, otherwise default order */}
-      <div className="p-2.5 sm:p-3 overflow-y-auto space-y-2.5 flex-1 bg-white">
+      <div ref={listContainerRef} className="p-2.5 sm:p-3 overflow-y-auto space-y-2.5 flex-1 bg-white">
         {filtered.length === 0 ? (
           <div className="text-center py-10 text-slate-400 text-xs sm:text-sm">
             ไม่พบศูนย์พักพิงในพื้นที่นี้

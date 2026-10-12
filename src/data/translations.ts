@@ -120,7 +120,7 @@ export const TRANSLATIONS = {
     },
     // Dashboard
     dashboard: {
-      title: 'แดชบอร์ดติดตามสถานการณ์อุทกภัย 5 จังหวัดภาคเหนือ',
+      title: 'แดชบอร์ดติดตามสถานการณ์อุทกภัย',
       subtitle: 'สรุปภาพรวมพื้นที่เสี่ยง สถิติเชิงเปรียบเทียบ และความพร้อมของศูนย์พักพิง',
       summaryCards: {
         totalRiskAreas: 'พื้นที่เสี่ยงทั้งหมด',
@@ -348,7 +348,7 @@ export const TRANSLATIONS = {
       calculating: 'Solving topology route with pgRouting...',
     },
     dashboard: {
-      title: 'Upper Northern Flood Situation Dashboard',
+      title: 'Flood Situation Dashboard',
       subtitle: 'Risk distribution analysis, inter-province metrics and shelter preparedness',
       summaryCards: {
         totalRiskAreas: 'Total Risk Zones',
